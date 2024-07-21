@@ -23,10 +23,10 @@ class MyViewModel: ViewModel() {
     }
 
     private suspend fun startUwbScanning() {
-        // Platform-specific UWB scanning logic will be implemented in platform modules
+        startUwb()
     }
 
     private suspend fun stopUwbScanning() {
-        // Platform-specific UWB stopping logic
+        stopUwb()
     }
 }
