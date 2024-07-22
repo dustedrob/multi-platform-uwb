@@ -47,6 +47,8 @@ kotlin {
             implementation(libs.koin.compose)
             implementation(libs.lifecycle.viewmodel)
             implementation(libs.navigation.compose)
+            api(libs.moko.permissions)
+            api(libs.moko.permissions.compose)
         }
     }
 }
