@@ -1,4 +1,4 @@
-package com.dustedrob.crossplatformuwb
+package com.dustedrob.multiplatformuwb
 
 import App
 import android.os.Bundle

@@ -1,4 +1,4 @@
-rootProject.name = "CrossPlatformUWB"
+rootProject.name = "multiplatformuwb"
 enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
 
 pluginManagement {
