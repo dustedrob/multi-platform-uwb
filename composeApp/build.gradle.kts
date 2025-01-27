@@ -7,11 +7,12 @@ plugins {
     alias(libs.plugins.androidApplication)
     alias(libs.plugins.jetbrainsCompose)
     alias(libs.plugins.compose.compiler)
+
+
 }
 
 kotlin {
     androidTarget {
-        @OptIn(ExperimentalKotlinGradlePluginApi::class)
         compilerOptions {
             jvmTarget.set(JvmTarget.JVM_11)
         }
@@ -35,6 +36,8 @@ kotlin {
             implementation(libs.androidx.activity.compose)
             implementation(libs.koin.android)
             implementation(libs.koin.androidx.compose)
+            implementation(libs.androidx.uwb)
+
         }
         commonMain.dependencies {
             implementation(compose.runtime)
@@ -51,6 +54,12 @@ kotlin {
             api(libs.moko.permissions.compose)
         }
     }
+}
+
+repositories {
+    mavenCentral()
+    google()
+    mavenLocal()
 }
 
 android {

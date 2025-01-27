@@ -1,5 +1,5 @@
 [versions]
-agp = "8.7.2"
+agp = "8.7.3"
 android-compileSdk = "34"
 android-minSdk = "24"
 android-targetSdk = "34"
@@ -12,15 +12,17 @@ androidx-material = "1.12.0"
 androidx-test-junit = "1.2.1"
 compose-plugin = "1.7.0"
 junit = "4.13.2"
-kotlin = "2.0.21"
+kotlin = "2.1.0"
 lifecycleViewModel = "2.8.7"
 koin = "3.6.0-alpha3"
 koinCompose = "3.6.0-alpha3"
 koinComposeMultiplatform = "1.2.0-alpha3"
 navigationCompose = "2.7.0-alpha07"
 moko = "0.18.0"
+uwb = "1.0.0-alpha10"
 
 [libraries]
+androidx-uwb = { module = "androidx.core.uwb:uwb", version.ref = "uwb" }
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
 kotlin-test-junit = { module = "org.jetbrains.kotlin:kotlin-test-junit", version.ref = "kotlin" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
