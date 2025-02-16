@@ -37,6 +37,7 @@ kotlin {
             implementation(libs.koin.android)
             implementation(libs.koin.androidx.compose)
             implementation(libs.androidx.uwb)
+            implementation(libs.koin.androidx.compose)
 
         }
         commonMain.dependencies {
@@ -47,6 +48,7 @@ kotlin {
             implementation(compose.components.resources)
             implementation(compose.components.uiToolingPreview)
             implementation(libs.kotlinx.datetime)
+            implementation(libs.koin.core)
             api(libs.koin.core)
             implementation(libs.koin.compose)
             implementation(libs.lifecycle.viewmodel)
@@ -54,6 +56,8 @@ kotlin {
             api(libs.moko.permissions)
             api(libs.moko.permissions.compose)
         }
+
+
     }
 }
 

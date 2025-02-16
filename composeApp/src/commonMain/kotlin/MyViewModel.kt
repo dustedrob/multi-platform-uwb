@@ -9,54 +9,87 @@ import dev.icerock.moko.permissions.Permission
 import dev.icerock.moko.permissions.PermissionState
 import dev.icerock.moko.permissions.PermissionsController
 import dev.icerock.moko.permissions.RequestCanceledException
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-class MyViewModel(val controller: PermissionsController) : ViewModel() {
+class MyViewModel(
+    private val controller: PermissionsController,
+    private val managerFactory: ManagerFactory
+) : ViewModel() {
+    private val deviceDiscoveryManager = DeviceDiscoveryManager(
+        managerFactory.createUwbManager(),
+        managerFactory.createBleManager()
+    )
     var permissionState by mutableStateOf(PermissionState.NotDetermined)
         private set
 
     private val _isScanning = MutableStateFlow(false)
     val isScanning = _isScanning.asStateFlow()
 
-    private val coroutineScope = CoroutineScope(Dispatchers.Main)
+    private val _nearbyDevices = MutableStateFlow<List<NearbyDevice>>(emptyList())
+    val nearbyDevices = _nearbyDevices.asStateFlow()
 
-    fun toggleScanning() {
-        coroutineScope.launch {
-            _isScanning.value = !_isScanning.value
-            if (_isScanning.value) {
-                startUwbScanning()
-            } else {
-                stopUwbScanning()
+    init {
+        // Observe nearby devices
+        viewModelScope.launch {
+            deviceDiscoveryManager.nearbyDevices.collect { devices ->
+                _nearbyDevices.value = devices
             }
         }
     }
 
-    fun requestPermissions(){
+    fun toggleScanning() {
         viewModelScope.launch {
-            try {
-                controller.getPermissionState(Permission.BLUETOOTH_LE)
-                permissionState = PermissionState.Granted
-            } catch (e: DeniedAlwaysException){
-                permissionState = PermissionState.DeniedAlways
+            if (!_isScanning.value) {
+                // Check permissions before starting scan
+                if (checkAndRequestPermissions()) {
+                    startUwbScanning()
+                    _isScanning.value = true
+                }
+            } else {
+                stopUwbScanning()
+                _isScanning.value = false
             }
-            catch (e: DeniedException){
-                permissionState = PermissionState.Denied
-            }
-            catch (e: RequestCanceledException) {
-                e.printStackTrace()
-            }
+        }
+    }
+
+    private suspend fun checkAndRequestPermissions(): Boolean {
+        return try {
+            // Request both Bluetooth LE and UWB permissions
+            controller.providePermission(Permission.BLUETOOTH_LE)
+            // Note: You might need to add UWB permission to moko-permissions library
+            // or handle it separately using platform-specific code
+            permissionState = PermissionState.Granted
+            true
+        } catch (e: DeniedAlwaysException) {
+            permissionState = PermissionState.DeniedAlways
+            false
+        } catch (e: DeniedException) {
+            permissionState = PermissionState.Denied
+            false
+        } catch (e: RequestCanceledException) {
+            e.printStackTrace()
+            false
+        }
+    }
+
+    fun requestPermissions() {
+        viewModelScope.launch {
+            checkAndRequestPermissions()
         }
     }
 
     private suspend fun startUwbScanning() {
-        startUwb()
+        deviceDiscoveryManager.startScanning()
     }
 
     private suspend fun stopUwbScanning() {
-        stopUwb()
+        deviceDiscoveryManager.stopScanning()
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        deviceDiscoveryManager.stopScanning()
     }
 }

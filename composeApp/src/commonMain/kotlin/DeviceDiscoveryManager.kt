@@ -4,7 +4,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.datetime.Clock
 
 class DeviceDiscoveryManager(
-    private val uwbManager: UwbManager,
+    private val multiplatformUwbManager: MultiplatformUwbManager,
     private val bleManager: BleManager
 ) {
     private val _nearbyDevices = MutableStateFlow<List<NearbyDevice>>(emptyList())
@@ -21,7 +21,7 @@ class DeviceDiscoveryManager(
         bleManager.advertise()
 
         // Initialize UWB
-        uwbManager.initialize()
+        multiplatformUwbManager.initialize()
     }
 
     fun stopScanning() {
@@ -34,7 +34,7 @@ class DeviceDiscoveryManager(
 
         // Stop all active UWB ranging sessions
         _nearbyDevices.value.forEach { device ->
-            uwbManager.stopRanging(device.id)
+            multiplatformUwbManager.stopRanging(device.id)
         }
 
         // Clear device list
@@ -51,7 +51,7 @@ class DeviceDiscoveryManager(
             _nearbyDevices.value = existingDevices
 
             // Start UWB ranging with the new device
-            uwbManager.startRanging(id)
+            multiplatformUwbManager.startRanging(id)
         }
     }
 
