@@ -1,6 +1,7 @@
+
 actual class UwbManager {
     actual fun initialize() {
-        // Implementation using NearbyInteraction framework
+        // Implementation using UWB APIs (android.uwb)
     }
 
     actual fun startRanging(peerId: String) {

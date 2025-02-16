@@ -1,1 +1,0 @@
-data class UwbDevice(val id: String, val name: String, val distance: Double)
