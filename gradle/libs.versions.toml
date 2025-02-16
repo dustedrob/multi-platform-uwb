@@ -20,6 +20,7 @@ koinComposeMultiplatform = "1.2.0-alpha3"
 navigationCompose = "2.7.0-alpha07"
 moko = "0.18.0"
 uwb = "1.0.0-alpha10"
+kotlinx-datetime = "0.6.2"
 
 [libraries]
 androidx-uwb = { module = "androidx.core.uwb:uwb", version.ref = "uwb" }
@@ -41,6 +42,7 @@ koin-compose = { module = "io.insert-koin:koin-compose", version.ref = "koinComp
 navigation-compose = { module = "org.jetbrains.androidx.navigation:navigation-compose", version.ref = "navigationCompose" }
 moko-permissions = { module = "dev.icerock.moko:permissions", version.ref = "moko" }
 moko-permissions-compose = { module = "dev.icerock.moko:permissions-compose", version.ref = "moko" }
+kotlinx-datetime = {module = "org.jetbrains.kotlinx:kotlinx-datetime", version.ref = "kotlinx-datetime"}
 
 [plugins]
 androidApplication = { id = "com.android.application", version.ref = "agp" }

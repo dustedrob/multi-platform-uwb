@@ -1,6 +1,7 @@
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.datetime.Clock
 
 class DeviceDiscoveryManager(
     private val uwbManager: UwbManager,
@@ -62,7 +63,7 @@ class DeviceDiscoveryManager(
         if (deviceIndex != -1) {
             existingDevices[deviceIndex] = existingDevices[deviceIndex].copy(
                 distance = distance,
-                lastSeen = System.currentTimeMillis()
+                lastSeen = Clock.System.now().toEpochMilliseconds()
             )
             _nearbyDevices.value = existingDevices
         }
