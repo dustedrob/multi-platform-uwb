@@ -1,3 +1,4 @@
+import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.bluetooth.le.AdvertiseCallback
@@ -10,8 +11,11 @@ import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.ParcelUuid
 import android.util.Log
+import androidx.core.content.ContextCompat
 import java.util.UUID
 
 actual class BleManager(private val context: Context) {
@@ -26,12 +30,6 @@ actual class BleManager(private val context: Context) {
     }
     private val bluetoothAdapter: BluetoothAdapter? by lazy {
         bluetoothManager.adapter
-    }
-    private val bluetoothLeScanner: BluetoothLeScanner? by lazy {
-        bluetoothAdapter?.bluetoothLeScanner
-    }
-    private val bluetoothLeAdvertiser: BluetoothLeAdvertiser? by lazy {
-        bluetoothAdapter?.bluetoothLeAdvertiser
     }
 
     // Scan callback
@@ -71,7 +69,29 @@ actual class BleManager(private val context: Context) {
             return
         }
 
+        // Check for scan permission
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) !=
+                PackageManager.PERMISSION_GRANTED) {
+                Log.e(TAG, "Missing BLUETOOTH_SCAN permission")
+                return
+            }
+        } else {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) !=
+                PackageManager.PERMISSION_GRANTED) {
+                Log.e(TAG, "Missing ACCESS_FINE_LOCATION permission")
+                return
+            }
+        }
+
         try {
+            // Get scanner
+            val bluetoothLeScanner = bluetoothAdapter?.bluetoothLeScanner
+            if (bluetoothLeScanner == null) {
+                Log.e(TAG, "Bluetooth LE Scanner not available")
+                return
+            }
+
             // Create scan settings
             val scanSettings = ScanSettings.Builder()
                 .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
@@ -83,19 +103,35 @@ actual class BleManager(private val context: Context) {
                 .build()
 
             // Start scanning
-            bluetoothLeScanner?.startScan(
+            bluetoothLeScanner.startScan(
                 listOf(scanFilter),
                 scanSettings,
                 scanCallback
-            ) ?: Log.e(TAG, "Cannot start scan - scanner is null")
+            )
+            Log.d(TAG, "BLE scanning started")
         } catch (e: Exception) {
             Log.e(TAG, "Error starting BLE scan: ${e.message}")
         }
     }
 
     actual fun stopScanning() {
+        // Check for scan permission
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) !=
+                PackageManager.PERMISSION_GRANTED) {
+                Log.e(TAG, "Missing BLUETOOTH_SCAN permission")
+                return
+            }
+        } else {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) !=
+                PackageManager.PERMISSION_GRANTED) {
+                Log.e(TAG, "Missing ACCESS_FINE_LOCATION permission")
+                return
+            }
+        }
+
         try {
-            bluetoothLeScanner?.stopScan(scanCallback)
+            bluetoothAdapter?.bluetoothLeScanner?.stopScan(scanCallback)
             Log.d(TAG, "BLE scanning stopped")
         } catch (e: Exception) {
             Log.e(TAG, "Error stopping BLE scan: ${e.message}")
@@ -109,7 +145,23 @@ actual class BleManager(private val context: Context) {
             return
         }
 
+        // Check for advertise permission
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_ADVERTISE) !=
+                PackageManager.PERMISSION_GRANTED) {
+                Log.e(TAG, "Missing BLUETOOTH_ADVERTISE permission")
+                return
+            }
+        }
+
         try {
+            // Get advertiser
+            val bluetoothLeAdvertiser = bluetoothAdapter?.bluetoothLeAdvertiser
+            if (bluetoothLeAdvertiser == null) {
+                Log.e(TAG, "Bluetooth LE Advertiser not available")
+                return
+            }
+
             // Create advertise settings
             val advertiseSettings = AdvertiseSettings.Builder()
                 .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
@@ -124,19 +176,29 @@ actual class BleManager(private val context: Context) {
                 .build()
 
             // Start advertising
-            bluetoothLeAdvertiser?.startAdvertising(
+            bluetoothLeAdvertiser.startAdvertising(
                 advertiseSettings,
                 advertiseData,
                 advertiseCallback
-            ) ?: Log.e(TAG, "Cannot start advertising - advertiser is null")
+            )
+            Log.d(TAG, "BLE advertising started")
         } catch (e: Exception) {
             Log.e(TAG, "Error starting BLE advertising: ${e.message}")
         }
     }
 
     actual fun stopAdvertising() {
+        // Check for advertise permission
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_ADVERTISE) !=
+                PackageManager.PERMISSION_GRANTED) {
+                Log.e(TAG, "Missing BLUETOOTH_ADVERTISE permission")
+                return
+            }
+        }
+
         try {
-            bluetoothLeAdvertiser?.stopAdvertising(advertiseCallback)
+            bluetoothAdapter?.bluetoothLeAdvertiser?.stopAdvertising(advertiseCallback)
             Log.d(TAG, "BLE advertising stopped")
         } catch (e: Exception) {
             Log.e(TAG, "Error stopping BLE advertising: ${e.message}")
