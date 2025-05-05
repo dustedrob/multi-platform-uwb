@@ -1,4 +1,5 @@
 import android.Manifest
+import android.Manifest.permission.BLUETOOTH_SCAN
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.bluetooth.le.AdvertiseCallback
@@ -71,14 +72,19 @@ actual class BleManager(private val context: Context) {
 
         // Check for scan permission
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) !=
-                PackageManager.PERMISSION_GRANTED) {
+            if (ContextCompat.checkSelfPermission(context, BLUETOOTH_SCAN) !=
+                PackageManager.PERMISSION_GRANTED
+            ) {
                 Log.e(TAG, "Missing BLUETOOTH_SCAN permission")
                 return
             }
         } else {
-            if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) !=
-                PackageManager.PERMISSION_GRANTED) {
+            if (ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.ACCESS_FINE_LOCATION
+                ) !=
+                PackageManager.PERMISSION_GRANTED
+            ) {
                 Log.e(TAG, "Missing ACCESS_FINE_LOCATION permission")
                 return
             }
@@ -102,13 +108,15 @@ actual class BleManager(private val context: Context) {
                 .setServiceUuid(ParcelUuid(UWB_SERVICE_UUID))
                 .build()
 
-            // Start scanning
-            bluetoothLeScanner.startScan(
-                listOf(scanFilter),
-                scanSettings,
-                scanCallback
-            )
-            Log.d(TAG, "BLE scanning started")
+
+            if (context.checkSelfPermission(BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED) {
+                bluetoothLeScanner.startScan(
+                    listOf(scanFilter),
+                    scanSettings,
+                    scanCallback
+                )
+                Log.d(TAG, "BLE scanning started")
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error starting BLE scan: ${e.message}")
         }
@@ -117,24 +125,31 @@ actual class BleManager(private val context: Context) {
     actual fun stopScanning() {
         // Check for scan permission
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) !=
-                PackageManager.PERMISSION_GRANTED) {
+            if (ContextCompat.checkSelfPermission(context, BLUETOOTH_SCAN) !=
+                PackageManager.PERMISSION_GRANTED
+            ) {
                 Log.e(TAG, "Missing BLUETOOTH_SCAN permission")
                 return
             }
         } else {
-            if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) !=
-                PackageManager.PERMISSION_GRANTED) {
+            if (ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.ACCESS_FINE_LOCATION
+                ) !=
+                PackageManager.PERMISSION_GRANTED
+            ) {
                 Log.e(TAG, "Missing ACCESS_FINE_LOCATION permission")
                 return
             }
         }
 
-        try {
-            bluetoothAdapter?.bluetoothLeScanner?.stopScan(scanCallback)
-            Log.d(TAG, "BLE scanning stopped")
-        } catch (e: Exception) {
-            Log.e(TAG, "Error stopping BLE scan: ${e.message}")
+        if (context.checkSelfPermission(BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED) {
+            try {
+                bluetoothAdapter?.bluetoothLeScanner?.stopScan(scanCallback)
+                Log.d(TAG, "BLE scanning stopped")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error stopping BLE scan: ${e.message}")
+            }
         }
     }
 
@@ -147,8 +162,12 @@ actual class BleManager(private val context: Context) {
 
         // Check for advertise permission
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_ADVERTISE) !=
-                PackageManager.PERMISSION_GRANTED) {
+            if (ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.BLUETOOTH_ADVERTISE
+                ) !=
+                PackageManager.PERMISSION_GRANTED
+            ) {
                 Log.e(TAG, "Missing BLUETOOTH_ADVERTISE permission")
                 return
             }
@@ -176,12 +195,15 @@ actual class BleManager(private val context: Context) {
                 .build()
 
             // Start advertising
-            bluetoothLeAdvertiser.startAdvertising(
-                advertiseSettings,
-                advertiseData,
-                advertiseCallback
-            )
-            Log.d(TAG, "BLE advertising started")
+
+            if (context.checkSelfPermission(Manifest.permission.BLUETOOTH_ADVERTISE) == PackageManager.PERMISSION_GRANTED) {
+                bluetoothLeAdvertiser.startAdvertising(
+                    advertiseSettings,
+                    advertiseData,
+                    advertiseCallback
+                )
+                Log.d(TAG, "BLE advertising started")
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error starting BLE advertising: ${e.message}")
         }
@@ -190,16 +212,22 @@ actual class BleManager(private val context: Context) {
     actual fun stopAdvertising() {
         // Check for advertise permission
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_ADVERTISE) !=
-                PackageManager.PERMISSION_GRANTED) {
+            if (ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.BLUETOOTH_ADVERTISE
+                ) !=
+                PackageManager.PERMISSION_GRANTED
+            ) {
                 Log.e(TAG, "Missing BLUETOOTH_ADVERTISE permission")
                 return
             }
         }
 
         try {
-            bluetoothAdapter?.bluetoothLeAdvertiser?.stopAdvertising(advertiseCallback)
-            Log.d(TAG, "BLE advertising stopped")
+            if (context.checkSelfPermission(Manifest.permission.BLUETOOTH_ADVERTISE) == PackageManager.PERMISSION_GRANTED) {
+                bluetoothAdapter?.bluetoothLeAdvertiser?.stopAdvertising(advertiseCallback)
+                Log.d(TAG, "BLE advertising stopped")
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error stopping BLE advertising: ${e.message}")
         }
