@@ -8,6 +8,6 @@ actual class ManagerFactory(private val context: Context) {
     }
 
     actual fun createBleManager(): BleManager {
-        return BleManager()
+        return BleManager(context)
     }
 }
