@@ -33,6 +33,8 @@ actual class BleManager(private val context: Context) {
         bluetoothManager.adapter
     }
 
+    private var deviceDiscoveredCallback: ((String, String) -> Unit)? = null
+
     // Scan callback
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
@@ -43,8 +45,7 @@ actual class BleManager(private val context: Context) {
 
             Log.d(TAG, "Found device: $deviceName ($deviceAddress)")
 
-            // Forward to device discovery manager (in a real implementation)
-            // deviceDiscoveryManager.onDeviceDiscovered(deviceAddress, deviceName)
+            deviceDiscoveredCallback?.invoke(deviceAddress, deviceName)
         }
 
         override fun onScanFailed(errorCode: Int) {
@@ -231,5 +232,9 @@ actual class BleManager(private val context: Context) {
         } catch (e: Exception) {
             Log.e(TAG, "Error stopping BLE advertising: ${e.message}")
         }
+    }
+
+    actual fun setDeviceDiscoveredCallback(callback: (id: String, name: String) -> Unit) {
+        deviceDiscoveredCallback = callback
     }
 }

@@ -12,6 +12,18 @@ class DeviceDiscoveryManager(
 
     private var isScanning = false
 
+    init {
+        bleManager.setDeviceDiscoveredCallback { id, name ->
+            onDeviceDiscovered(id, name)
+        }
+        multiplatformUwbManager.setRangingCallback { peerId, distance ->
+            onRangingResult(peerId, distance)
+        }
+        multiplatformUwbManager.setErrorCallback { error ->
+            // Handle UWB errors
+        }
+    }
+
     fun startScanning() {
         if (isScanning) return
         isScanning = true
