@@ -1,6 +1,6 @@
-# Mesh Networking App with UWB (Ultra-Wideband) – Kotlin Multiplatform
+# Multiplatform UWB Library – Kotlin Multiplatform
 
-This repository contains the source code for a mobile application built using **Kotlin Multiplatform**. The app enables **mesh networking** functionality via **Ultra-Wideband (UWB)** technology on both **Android** and **iOS** platforms. It allows devices to communicate directly with one another in a mesh network, offering a low-power, high-accuracy, and real-time communication experience for a variety of use cases such as indoor navigation, asset tracking, and peer-to-peer interactions.
+This repository contains a **Kotlin Multiplatform library** for **Ultra-Wideband (UWB)** device discovery and ranging on both **Android** and **iOS** platforms. The library provides a unified API for UWB functionality while leveraging platform-specific implementations for optimal performance and hardware access.
 
 ---
 
@@ -20,44 +20,63 @@ This repository contains the source code for a mobile application built using **
 
 ## Overview
 
-This mobile app leverages the **Kotlin Multiplatform** framework to share common code between Android and iOS, with platform-specific implementations for accessing UWB hardware capabilities on both platforms. The mesh networking functionality is based on UWB, enabling devices to communicate without relying on a traditional centralized network.
+This library provides a **Kotlin Multiplatform** abstraction for **Ultra-Wideband (UWB)** device discovery and ranging. It combines **Bluetooth Low Energy (BLE)** for initial device discovery with **UWB** for precise distance measurement, offering a unified API across Android and iOS platforms.
 
 ### Key Concepts
-- **Mesh Network**: A decentralized network structure where each device (node) can communicate with other devices, forwarding messages between them to create a scalable and fault-tolerant network.
-- **Ultra-Wideband (UWB)**: A wireless communication technology that enables precise location tracking and high-speed data transfer over short distances.
-- **Kotlin Multiplatform**: Allows the sharing of common business logic and core functionality between Android and iOS, while enabling platform-specific code for UWB integration.
+- **Device Discovery**: Uses BLE advertising and scanning to find nearby UWB-capable devices
+- **UWB Ranging**: Provides precise distance measurements between devices using UWB technology
+- **Cross-Platform Abstraction**: Common API with platform-specific implementations for optimal hardware access
+- **Reactive Architecture**: Uses Kotlin Flow for real-time device and distance updates
 
 ---
 
 ## Features
 
-- **Real-time Mesh Networking**: Devices can join the network and communicate directly with each other.
-- **UWB Integration**: Utilizes UWB hardware for accurate location tracking and direct device-to-device communication.
-- **Cross-Platform Support**: Built using Kotlin Multiplatform to support both **Android** and **iOS** with shared code.
-- **Battery Efficient**: Designed to operate efficiently, utilizing UWB’s low-power characteristics.
-- **Automatic Network Discovery**: Devices automatically detect and connect to others in range.
-- **Multi-device Communication**: Supports simultaneous communication between multiple devices within the mesh network.
+- **BLE Device Discovery**: Automatic scanning and advertising for UWB-capable devices
+- **Precise UWB Ranging**: Real-time distance measurements with centimeter-level accuracy
+- **Cross-Platform API**: Unified interface for both Android and iOS platforms
+- **Reactive Data Flow**: Kotlin Flow-based real-time updates for device discovery and ranging
+- **Permission Management**: Integrated permission handling for BLE and UWB access
+- **Error Handling**: Comprehensive error reporting and recovery mechanisms
 
 ---
 
 ## Architecture
 
-This application is structured as follows:
+The library follows a layered architecture with platform-specific implementations:
 
-1. **Kotlin Multiplatform Module**:
-  - Shared business logic and networking code.
-  - Includes common abstractions for mesh networking and UWB communication.
+### Core Components
 
-2. **Platform-Specific Code**:
-  - **Android**: UWB integration using the Android UWB APIs and Bluetooth Low Energy (BLE) for initial device discovery.
-  - **iOS**: UWB integration via Core Location and Core Bluetooth APIs.
+1. **Common Module** (`commonMain/kotlin/`):
+   - `DeviceDiscoveryManager`: Orchestrates BLE discovery and UWB ranging
+   - `NearbyDevice`: Data model for discovered devices with distance information
+   - `MultiplatformUwbManager`: Expect class for UWB operations
+   - `BleManager`: Expect class for Bluetooth LE operations
+   - `ManagerFactory`: Factory for creating platform-specific managers
 
-3. **UI Layer**:
-  - Implemented separately for Android and iOS using their respective UI frameworks (Jetpack Compose for Android, SwiftUI for iOS).
-  - Platform-specific UI components interact with the shared logic layer to facilitate network management.
+2. **Android Implementation** (`androidMain/kotlin/`):
+   - `MultiplatformUwbManager.android.kt`: Uses androidx.core.uwb for UWB ranging
+   - `BleManager.kt`: Android Bluetooth LE scanning and advertising
+   - `ManagerFactory.android.kt`: Creates Android-specific manager instances
 
-4. **Mesh Networking Protocol**:
-  - Custom protocol built for efficient data exchange, leveraging UWB's high bandwidth and low latency.
+3. **iOS Implementation** (`iosMain/kotlin/`):
+   - `MultiplatformUwbManager.ios.kt`: Uses NearbyInteraction framework for UWB
+   - `BleManager.kt`: CoreBluetooth-based scanning and advertising
+   - `ManagerFactory.ios.kt`: Creates iOS-specific manager instances
+
+### Data Flow
+
+1. **Discovery Phase**: BLE scanning discovers nearby devices advertising UWB service UUID
+2. **Ranging Phase**: Discovered devices automatically initiate UWB ranging sessions
+3. **Updates**: Real-time distance measurements flow through reactive Kotlin Flow streams
+4. **Session Management**: Automatic lifecycle management for UWB sessions
+
+### Callback Architecture
+
+The library uses a callback-based system to bridge platform-specific implementations with common code:
+- Device discovery callbacks trigger UWB session initiation
+- Ranging callbacks provide real-time distance updates
+- Error callbacks handle platform-specific failures
 
 ---
 
@@ -65,43 +84,86 @@ This application is structured as follows:
 
 ### Prerequisites
 
-Before getting started, make sure you have the following tools installed on your machine:
-
 - **Android Studio** for Android development
-- **Xcode** for iOS development
-- **Kotlin** (>= 1.5.x) with **Kotlin Multiplatform** plugin
-- **UWB Hardware Support** on your Android and iOS devices
+- **Xcode** for iOS development  
+- **Kotlin Multiplatform** plugin
+- **UWB-capable devices** for testing
 
-### Clone the Repository
+### Integration
 
-```bash
-git clone https://github.com/your-username/mesh-networking-uwb-app.git
-cd mesh-networking-uwb-app
+Add the library to your Kotlin Multiplatform project:
+
+```kotlin
+// In your commonMain dependencies
+implementation("com.dustedrob:multiplatform-uwb:1.0.0")
 ```
 
-### Android Setup
+### Android Configuration
 
-1. Open the `android` directory in **Android Studio**.
-2. Ensure you have the correct **UWB** and **Bluetooth permissions** in your `AndroidManifest.xml`.
-3. Build and run on a physical Android device that supports UWB.
+Add required permissions to `AndroidManifest.xml`:
+```xml
+<uses-permission android:name="android.permission.BLUETOOTH" />
+<uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+<uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+<uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+<uses-permission android:name="android.permission.UWB_RANGING" />
+<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+```
 
-### iOS Setup
+### iOS Configuration
 
-1. Open the `ios` directory in **Xcode**.
-2. Configure your **UWB** and **Bluetooth** permissions in the `Info.plist`.
-3. Build and run on a physical iOS device with UWB support.
+Add required permissions to `Info.plist`:
+```xml
+<key>NSBluetoothAlwaysUsageDescription</key>
+<string>This app uses Bluetooth to discover nearby UWB devices</string>
+<key>NSBluetoothPeripheralUsageDescription</key>
+<string>This app uses Bluetooth to advertise UWB capabilities</string>
+```
 
 ---
 
 ## Usage
 
-Once the app is installed on both Android and iOS devices, follow these steps to use the mesh networking features:
+### Basic Implementation
 
-1. **Launch the App** on both devices.
-2. **Join the Network**: The app will automatically discover nearby devices via UWB and prompt you to join the mesh network.
-3. **Start Communicating**: Once connected, you can send and receive messages, share data, or interact with other devices in real-time.
+```kotlin
+// Create managers using factory
+val managerFactory = ManagerFactory(context) // Android context or iOS equivalent
+val deviceDiscoveryManager = DeviceDiscoveryManager(
+    managerFactory.createUwbManager(),
+    managerFactory.createBleManager()
+)
 
-The app will manage connections, ensure reliability, and automatically handle the addition of new devices to the network.
+// Observe nearby devices
+deviceDiscoveryManager.nearbyDevices.collect { devices ->
+    devices.forEach { device ->
+        println("Device: ${device.name}, Distance: ${device.distance}m")
+    }
+}
+
+// Start discovery and ranging
+deviceDiscoveryManager.startScanning()
+
+// Stop when done
+deviceDiscoveryManager.stopScanning()
+```
+
+### Integration with UI
+
+```kotlin
+class MyViewModel(private val managerFactory: ManagerFactory) : ViewModel() {
+    private val deviceDiscoveryManager = DeviceDiscoveryManager(
+        managerFactory.createUwbManager(),
+        managerFactory.createBleManager()
+    )
+    
+    val nearbyDevices = deviceDiscoveryManager.nearbyDevices
+    
+    fun toggleScanning() {
+        // Handle scanning state
+    }
+}
+```
 
 ---
 
@@ -115,37 +177,90 @@ The app will manage connections, ensure reliability, and automatically handle th
 
 ## Dependencies
 
-- **Kotlin** (1.5.x+)
-- **Kotlin Multiplatform** (1.5.x+)
-- **Jetpack Compose** (for Android UI)
-- **SwiftUI** (for iOS UI)
-- **UWB SDKs** (Android and iOS native SDKs for UWB communication)
-- **Bluetooth Low Energy** libraries (for device discovery)
+### Common Dependencies
+- **kotlinx-coroutines**: For asynchronous operations
+- **kotlinx-datetime**: For timestamp management
+- **moko-permissions**: Cross-platform permission handling
+
+### Android Dependencies
+- **androidx.core.uwb**: Android UWB API
+- **Android Bluetooth LE APIs**: Device discovery and advertising
+
+### iOS Dependencies
+- **NearbyInteraction**: iOS UWB framework
+- **CoreBluetooth**: iOS Bluetooth LE framework
+
+---
+
+## API Reference
+
+### DeviceDiscoveryManager
+Main orchestrator class that combines BLE discovery with UWB ranging.
+
+```kotlin
+class DeviceDiscoveryManager(
+    multiplatformUwbManager: MultiplatformUwbManager,
+    bleManager: BleManager
+)
+
+// Properties
+val nearbyDevices: Flow<List<NearbyDevice>>
+
+// Methods
+fun startScanning()
+fun stopScanning()
+```
+
+### NearbyDevice
+Data class representing a discovered device.
+
+```kotlin
+data class NearbyDevice(
+    val id: String,
+    val name: String,
+    val distance: Double? = null,
+    val lastSeen: Long
+)
+```
+
+### MultiplatformUwbManager
+Cross-platform UWB ranging interface.
+
+```kotlin
+expect class MultiplatformUwbManager {
+    fun initialize()
+    fun startRanging(peerId: String)
+    fun stopRanging(peerId: String)
+    fun setRangingCallback(callback: (peerId: String, distance: Double) -> Unit)
+    fun setErrorCallback(callback: (error: String) -> Unit)
+}
+```
+
+### BleManager
+Cross-platform Bluetooth LE interface.
+
+```kotlin
+expect class BleManager {
+    fun startScanning()
+    fun stopScanning()
+    fun advertise()
+    fun stopAdvertising()
+    fun setDeviceDiscoveredCallback(callback: (id: String, name: String) -> Unit)
+}
+```
 
 ---
 
 ## Contributing
 
-We welcome contributions to improve the functionality and performance of the mesh networking app. Here’s how you can help:
-
-1. **Fork** the repository and clone your fork.
-2. Create a **feature branch** (`git checkout -b feature-branch`).
-3. Commit your changes (`git commit -am 'Add new feature'`).
-4. Push to the branch (`git push origin feature-branch`).
-5. Open a **Pull Request** and describe your changes.
-
-Please ensure that you follow the coding style and write tests where applicable.
+Contributions are welcome! Please ensure you follow the existing code patterns and test on both platforms.
 
 ---
 
 ## License
 
-This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for more details.
+This project is licensed under the **MIT License**.
 
 ---
 
-If you have any questions or need assistance, feel free to open an issue in the repository or reach out to the maintainers.
-
----
-
-Enjoy building with Kotlin Multiplatform and UWB! 🚀
+Build precise location-aware applications with Kotlin Multiplatform and UWB! 🚀
