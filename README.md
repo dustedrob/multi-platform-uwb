@@ -53,6 +53,8 @@ The library follows a layered architecture with platform-specific implementation
    - `MultiplatformUwbManager`: Expect class for UWB operations
    - `BleManager`: Expect class for Bluetooth LE operations
    - `ManagerFactory`: Factory for creating platform-specific managers
+   - `PlatformManagerFactory`: Platform-specific factory creation functions
+   - `UwbDiscoveryViewModel`: ViewModel for UI integration with permission handling
 
 2. **Android Implementation** (`androidMain/kotlin/`):
    - `MultiplatformUwbManager.android.kt`: Uses androidx.core.uwb for UWB ranging
@@ -151,16 +153,25 @@ deviceDiscoveryManager.stopScanning()
 ### Integration with UI
 
 ```kotlin
-class MyViewModel(private val managerFactory: ManagerFactory) : ViewModel() {
+class UwbDiscoveryViewModel(
+    private val controller: PermissionsController,
+    private val managerFactory: ManagerFactory
+) : ViewModel() {
     private val deviceDiscoveryManager = DeviceDiscoveryManager(
         managerFactory.createUwbManager(),
         managerFactory.createBleManager()
     )
     
     val nearbyDevices = deviceDiscoveryManager.nearbyDevices
+    val isScanning: StateFlow<Boolean>
+    var permissionState: PermissionState
     
     fun toggleScanning() {
-        // Handle scanning state
+        // Handle scanning state with permission checks
+    }
+    
+    fun requestPermissions() {
+        // Request BLE and UWB permissions
     }
 }
 ```

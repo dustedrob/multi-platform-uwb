@@ -13,7 +13,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-class MyViewModel(
+class UwbDiscoveryViewModel(
     private val controller: PermissionsController,
     private val managerFactory: ManagerFactory
 ) : ViewModel() {

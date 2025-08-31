@@ -20,18 +20,17 @@ fun App() {
         factory.createPermissionsController()
     }
     BindEffect(controller)
-    val viewModel: MyViewModel = viewModel{
-        MyViewModel(controller)
+    val managerFactory = createManagerFactory()
+    val viewModel: UwbDiscoveryViewModel = viewModel{
+        UwbDiscoveryViewModel(controller, managerFactory)
     }
     val isScanning by viewModel.isScanning.collectAsState()
 
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         Button(onClick = {
             viewModel.requestPermissions()
-            if (true) {
+            if (viewModel.permissionState == PermissionState.Granted) {
                 viewModel.toggleScanning()
-            } else {
-                // Request permissions
             }
         }) {
             Text(if (isScanning) "Stop Scanning" else "Start Scanning")
@@ -39,19 +38,19 @@ fun App() {
 
         when (viewModel.permissionState){
             PermissionState.NotDetermined -> {
-
+                Text("Permissions not yet requested")
             }
             PermissionState.NotGranted -> {
-
+                Text("Permissions not granted")
             }
             PermissionState.Granted -> {
-
+                Text("Ready to scan for UWB devices")
             }
             PermissionState.Denied -> {
-
+                Text("Permissions denied. Please grant permissions in settings.")
             }
             PermissionState.DeniedAlways -> {
-
+                Text("Permissions permanently denied. Please enable in device settings.")
             }
         }
 
