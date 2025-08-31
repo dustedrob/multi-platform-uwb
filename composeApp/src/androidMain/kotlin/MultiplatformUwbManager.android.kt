@@ -23,8 +23,15 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
         androidUwbManager?.let { uwbManager ->
             coroutineScope.launch {
                 try {
-                    val capabilities = uwbManager.clientSessionScope()
-                    // UWB manager is ready
+                    // Check if UWB is available and get capabilities
+                    val clientSessionScope = uwbManager.controleeSessionScope()
+                    val capabilities = clientSessionScope.rangingCapabilities
+                    
+                    if (capabilities.isDistanceSupported) {
+                        // UWB manager is ready with distance support
+                    } else {
+                        errorCallback?.invoke("UWB distance ranging not supported")
+                    }
                 } catch (e: Exception) {
                     errorCallback?.invoke("Failed to initialize UWB: ${e.message}")
                 }
@@ -38,7 +45,7 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
         androidUwbManager?.let { uwbManager ->
             coroutineScope.launch {
                 try {
-                    val sessionScope = uwbManager.clientSessionScope()
+                    val sessionScope = uwbManager.controleeSessionScope()
                     activeSessions[peerId] = sessionScope
                     
                     // Create UWB device from peer ID
@@ -47,9 +54,11 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
                     
                     // Configure ranging parameters
                     val rangingParameters = RangingParameters(
-                        uwbConfigType = RangingParameters.UWB_CONFIG_ID_1,
+                        uwbConfigType = RangingParameters.CONFIG_UNICAST_DS_TWR,
                         sessionId = peerId.hashCode(),
+                        subSessionId = 1,
                         sessionKeyInfo = null,
+                        subSessionKeyInfo = null,
                         complexChannel = UwbComplexChannel(channel = 9, preambleIndex = 10),
                         peerDevices = listOf(uwbDevice),
                         updateRateType = RangingParameters.RANGING_UPDATE_RATE_AUTOMATIC
@@ -65,7 +74,7 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
                                 is RangingResult.RangingResultPosition -> {
                                     val distance = result.position.distance?.value
                                     if (distance != null) {
-                                        rangingCallback?.invoke(peerId, distance)
+                                        rangingCallback?.invoke(peerId, distance.toDouble())
                                     }
                                 }
                                 is RangingResult.RangingResultPeerDisconnected -> {
@@ -81,10 +90,10 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
     }
 
     actual fun stopRanging(peerId: String) {
-        activeSessions[peerId]?.let { session ->
+        activeSessions[peerId]?.let { _ ->
             coroutineScope.launch {
                 try {
-                    session.cancel()
+                    // Remove the session from active sessions
                     activeSessions.remove(peerId)
                 } catch (e: Exception) {
                     errorCallback?.invoke("Failed to stop ranging with $peerId: ${e.message}")
@@ -99,5 +108,11 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
 
     actual fun setErrorCallback(callback: (error: String) -> Unit) {
         errorCallback = callback
+    }
+    
+    // Cleanup method to stop all sessions and clean up resources
+    fun cleanup() {
+        activeSessions.clear()
+        coroutineScope.cancel()
     }
 }

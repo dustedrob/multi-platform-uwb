@@ -1,6 +1,9 @@
 import platform.NearbyInteraction.*
 import platform.Foundation.*
+import platform.darwin.NSObject
 import kotlinx.cinterop.*
+
+@OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
 
 actual class MultiplatformUwbManager {
     private var niSession: NISession? = null
@@ -19,38 +22,68 @@ actual class MultiplatformUwbManager {
 
     private fun setupSession() {
         niSession?.let { session ->
-            session.delegate = object : NSObject(), NISessionDelegateProtocol {
-                override fun session(session: NISession, didUpdateNearbyObjects objects: List<*>) {
-                    objects.forEach { obj ->
-                        if (obj is NINearbyObject) {
-                            val distance = obj.distance?.doubleValue
-                            val peerId = obj.discoveryToken.toString()
-                            if (distance != null) {
-                                rangingCallback?.invoke(peerId, distance)
-                            }
-                        }
-                    }
-                }
-
-                override fun session(session: NISession, didRemoveNearbyObjects objects: List<*>) {
-                    // Handle removed objects
-                }
-
-                override fun session(session: NISession, didFailWithError error: NSError) {
-                    errorCallback?.invoke("NI Session failed: ${error.localizedDescription}")
+            val delegate = SessionDelegate()
+            session.delegate = delegate
+        }
+    }
+    
+    private inner class SessionDelegate : NSObject(), NISessionDelegateProtocol {
+        override fun session(session: NISession, didUpdateNearbyObjects: List<*>) {
+            didUpdateNearbyObjects.forEach { obj ->
+                if (obj is NINearbyObject) {
+                    val distance = obj.distance.toDouble()
+                    val peerId = activePeers.entries.find { it.value == obj.discoveryToken }?.key ?: "unknown"
+                    rangingCallback?.invoke(peerId, distance)
                 }
             }
+        }
+        
+        override fun session(session: NISession, didRemoveNearbyObjects: List<*>, withReason: NINearbyObjectRemovalReason) {
+            didRemoveNearbyObjects.forEach { obj ->
+                if (obj is NINearbyObject) {
+                    val peerId = activePeers.entries.find { it.value == obj.discoveryToken }?.key
+                    peerId?.let { activePeers.remove(it) }
+                }
+            }
+        }
+        
+        override fun session(session: NISession, didInvalidateWithError: NSError) {
+            val errorMessage = didInvalidateWithError.localizedDescription
+            errorCallback?.invoke("NI Session error: $errorMessage")
+            
+            // Clear active peers and reset session
+            activePeers.clear()
+            niSession = null
+        }
+        
+        override fun session(session: NISession, didGenerateShareableConfigurationData: NSData, forObject: NINearbyObject) {
+            // Handle shareable configuration data if needed
+        }
+        
+        override fun session(session: NISession, didUpdateAlgorithmConvergence: NIAlgorithmConvergence, forObject: NINearbyObject?) {
+            // Handle algorithm convergence updates if needed
+        }
+        
+        override fun sessionDidStartRunning(session: NISession) {
+            // Session started successfully
+        }
+        
+        override fun sessionWasSuspended(session: NISession) {
+            errorCallback?.invoke("NI Session was suspended")
+        }
+        
+        override fun sessionSuspensionEnded(session: NISession) {
+            // Session resumed, can continue ranging
         }
     }
 
     actual fun startRanging(peerId: String) {
         niSession?.let { session ->
-            // In a real implementation, you'd need to get the discovery token from the peer
-            // This would typically come from BLE exchange
-            // For now, we'll simulate this
+            // Store the peer for tracking
             val token = createDiscoveryTokenForPeer(peerId)
             activePeers[peerId] = token
             
+            // Start the session with basic configuration
             val config = NIConfiguration()
             session.runWithConfiguration(config)
         }
@@ -71,9 +104,10 @@ actual class MultiplatformUwbManager {
         errorCallback = callback
     }
 
-    private fun createDiscoveryTokenForPeer(peerId: String): NIDiscoveryToken {
-        // In a real implementation, this would be exchanged via BLE
-        // For now, create a mock token
+    private fun createDiscoveryTokenForPeer(@Suppress("UNUSED_PARAMETER") peerId: String): NIDiscoveryToken {
+        // In a real implementation, discovery tokens would be exchanged via BLE
+        // NIDiscoveryToken should be obtained from the peer device
+        // Note: This needs to be replaced with actual token exchange logic
         return NIDiscoveryToken()
     }
 }
