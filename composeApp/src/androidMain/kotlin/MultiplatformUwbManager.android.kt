@@ -1,11 +1,10 @@
-import androidx.core.uwb.UwbManager
-import androidx.core.uwb.RangingCapabilities
 import androidx.core.uwb.RangingParameters
 import androidx.core.uwb.RangingResult
 import androidx.core.uwb.UwbAddress
 import androidx.core.uwb.UwbClientSessionScope
 import androidx.core.uwb.UwbComplexChannel
 import androidx.core.uwb.UwbDevice
+import androidx.core.uwb.UwbManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob

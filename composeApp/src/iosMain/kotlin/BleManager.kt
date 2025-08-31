@@ -1,6 +1,16 @@
-import platform.CoreBluetooth.*
-import platform.Foundation.*
-import kotlinx.cinterop.*
+import platform.CoreBluetooth.CBAdvertisementDataLocalNameKey
+import platform.CoreBluetooth.CBAdvertisementDataServiceUUIDsKey
+import platform.CoreBluetooth.CBCentralManager
+import platform.CoreBluetooth.CBCentralManagerDelegateProtocol
+import platform.CoreBluetooth.CBManagerStatePoweredOff
+import platform.CoreBluetooth.CBManagerStatePoweredOn
+import platform.CoreBluetooth.CBPeripheral
+import platform.CoreBluetooth.CBPeripheralManager
+import platform.CoreBluetooth.CBPeripheralManagerDelegateProtocol
+import platform.CoreBluetooth.CBUUID
+import platform.Foundation.NSError
+import platform.Foundation.NSNumber
+import platform.darwin.NSObject
 
 actual class BleManager {
     private var centralManager: CBCentralManager? = null
