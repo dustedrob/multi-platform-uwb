@@ -32,6 +32,7 @@
 	<key>UIRequiredDeviceCapabilities</key>
 	<array>
 		<string>armv7</string>
+		<string>nearby-interaction</string>
 	</array>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
@@ -46,5 +47,9 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>This app uses Bluetooth to discover nearby UWB devices for precise ranging</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>This app uses Bluetooth to advertise UWB capabilities to other devices</string>
 </dict>
 </plist>
