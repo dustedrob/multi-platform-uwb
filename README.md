@@ -1,6 +1,6 @@
-# Multiplatform UWB Library – Kotlin Multiplatform
+# Multiplatform UWB Project – Kotlin Multiplatform
 
-This repository contains a **Kotlin Multiplatform library** for **Ultra-Wideband (UWB)** device discovery and ranging on both **Android** and **iOS** platforms. The library provides a unified API for UWB functionality while leveraging platform-specific implementations for optimal performance and hardware access.
+This repository contains a **Kotlin Multiplatform project** for **Ultra-Wideband (UWB)** device discovery and ranging on both **Android** and **iOS** platforms. The project consists of a modular architecture with the core UWB functionality packaged as a separate library module (`uwbmodule`) and a sample application (`composeApp`) demonstrating its usage.
 
 ---
 
@@ -20,7 +20,12 @@ This repository contains a **Kotlin Multiplatform library** for **Ultra-Wideband
 
 ## Overview
 
-This library provides a **Kotlin Multiplatform** abstraction for **Ultra-Wideband (UWB)** device discovery and ranging. It combines **Bluetooth Low Energy (BLE)** for initial device discovery with **UWB** for precise distance measurement, offering a unified API across Android and iOS platforms.
+This project provides a **Kotlin Multiplatform** solution for **Ultra-Wideband (UWB)** device discovery and ranging. The project is structured as:
+
+- **`uwbmodule`**: A Kotlin Multiplatform library module containing the core UWB functionality
+- **`composeApp`**: A sample Compose Multiplatform application demonstrating library usage
+
+The library combines **Bluetooth Low Energy (BLE)** for initial device discovery with **UWB** for precise distance measurement, offering a unified API across Android and iOS platforms.
 
 ### Key Concepts
 - **Device Discovery**: Uses BLE advertising and scanning to find nearby UWB-capable devices
@@ -43,28 +48,40 @@ This library provides a **Kotlin Multiplatform** abstraction for **Ultra-Wideban
 
 ## Architecture
 
-The library follows a layered architecture with platform-specific implementations:
+The project follows a modular architecture with the UWB functionality extracted into a separate library module:
 
-### Core Components
+### Project Structure
 
-1. **Common Module** (`commonMain/kotlin/`):
+- **`uwbmodule/`**: Kotlin Multiplatform library module containing the core UWB functionality
+- **`composeApp/`**: Sample Compose Multiplatform application demonstrating library usage
+
+### UWB Module Components (`uwbmodule/`)
+
+1. **Common Module** (`src/commonMain/kotlin/`):
    - `DeviceDiscoveryManager`: Orchestrates BLE discovery and UWB ranging
-   - `NearbyDevice`: Data model for discovered devices with distance information
+   - `MultiplatformUwb`: Main entry point and data models
    - `MultiplatformUwbManager`: Expect class for UWB operations
-   - `BleManager`: Expect class for Bluetooth LE operations
+   - `BleManager`: Expect class for Bluetooth LE operations (moved from common project)
    - `ManagerFactory`: Factory for creating platform-specific managers
-   - `PlatformManagerFactory`: Platform-specific factory creation functions
-   - `UwbDiscoveryViewModel`: ViewModel for UI integration with permission handling
 
-2. **Android Implementation** (`androidMain/kotlin/`):
+2. **Android Implementation** (`src/androidMain/kotlin/`):
    - `MultiplatformUwbManager.android.kt`: Uses androidx.core.uwb for UWB ranging
    - `BleManager.kt`: Android Bluetooth LE scanning and advertising
    - `ManagerFactory.android.kt`: Creates Android-specific manager instances
 
-3. **iOS Implementation** (`iosMain/kotlin/`):
+3. **iOS Implementation** (`src/iosMain/kotlin/`):
    - `MultiplatformUwbManager.ios.kt`: Uses NearbyInteraction framework for UWB
    - `BleManager.kt`: CoreBluetooth-based scanning and advertising
    - `ManagerFactory.ios.kt`: Creates iOS-specific manager instances
+
+### Module Dependencies
+
+The `uwbmodule` is configured as an Android library and iOS framework with the following key dependencies:
+- **Koin**: For dependency injection
+- **androidx.uwb**: Android UWB API
+- **kotlinx.datetime**: Timestamp management
+- **moko-permissions**: Cross-platform permission handling
+- **lifecycle-viewmodel**: ViewModel support
 
 ### Data Flow
 
@@ -91,13 +108,33 @@ The library uses a callback-based system to bridge platform-specific implementat
 - **Kotlin Multiplatform** plugin
 - **UWB-capable devices** for testing
 
-### Integration
+### Development Setup
 
-Add the library to your Kotlin Multiplatform project:
+1. **Clone the repository**:
+   ```bash
+   git clone <repository-url>
+   cd "Multiplatform UWB"
+   ```
+
+2. **Open in Android Studio** with the Kotlin Multiplatform plugin installed
+
+3. **Build the project**:
+   ```bash
+   ./gradlew build
+   ```
+
+### Using the Library Module
+
+To integrate the `uwbmodule` in your own project:
 
 ```kotlin
-// In your commonMain dependencies
-implementation("com.dustedrob:multiplatform-uwb:1.0.0")
+// In your build.gradle.kts, add the module dependency
+dependencies {
+    implementation(project(":uwbmodule"))
+}
+
+// Or if published, use:
+// implementation("com.dustedrob:uwbmodule:1.0.0")
 ```
 
 ### Android Configuration

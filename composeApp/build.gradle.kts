@@ -36,9 +36,6 @@ kotlin {
             implementation(libs.androidx.activity.compose)
             implementation(libs.koin.android)
             implementation(libs.koin.androidx.compose)
-            implementation(libs.androidx.uwb)
-            implementation(libs.koin.androidx.compose)
-
         }
         commonMain.dependencies {
             implementation(compose.runtime)
@@ -47,14 +44,12 @@ kotlin {
             implementation(compose.ui)
             implementation(compose.components.resources)
             implementation(compose.components.uiToolingPreview)
-            implementation(libs.kotlinx.datetime)
             implementation(libs.koin.core)
             api(libs.koin.core)
             implementation(libs.koin.compose)
             implementation(libs.lifecycle.viewmodel)
             implementation(libs.navigation.compose)
-            api(libs.moko.permissions)
-            api(libs.moko.permissions.compose)
+            implementation(project(":uwbmodule"))
         }
 
 
