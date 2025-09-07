@@ -16,6 +16,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.ParcelUuid
 import android.util.Log
+import androidx.annotation.RequiresPermission
 import androidx.core.content.ContextCompat
 import java.util.UUID
 
@@ -37,6 +38,7 @@ actual class BleManager(private val context: Context) {
 
     // Scan callback
     private val scanCallback = object : ScanCallback() {
+        @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             // Process scan results
             val device = result.device
@@ -64,6 +66,7 @@ actual class BleManager(private val context: Context) {
         }
     }
 
+    @RequiresPermission(Manifest.permission.BLUETOOTH_SCAN)
     actual fun startScanning() {
         // Check if Bluetooth is available and enabled
         if (bluetoothAdapter == null || !bluetoothAdapter!!.isEnabled) {
@@ -123,6 +126,7 @@ actual class BleManager(private val context: Context) {
         }
     }
 
+    @RequiresPermission(Manifest.permission.BLUETOOTH_SCAN)
     actual fun stopScanning() {
         // Check for scan permission
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -210,6 +214,7 @@ actual class BleManager(private val context: Context) {
         }
     }
 
+    @RequiresPermission(Manifest.permission.BLUETOOTH_ADVERTISE)
     actual fun stopAdvertising() {
         // Check for advertise permission
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
