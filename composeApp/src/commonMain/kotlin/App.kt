@@ -1,5 +1,10 @@
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.Button
 import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
@@ -26,7 +31,12 @@ fun App() {
     }
     val isScanning by viewModel.isScanning.collectAsState()
 
-    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .windowInsetsPadding(WindowInsets.systemBars),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
         Button(onClick = {
             viewModel.requestPermissions()
             if (viewModel.permissionState == PermissionState.Granted) {

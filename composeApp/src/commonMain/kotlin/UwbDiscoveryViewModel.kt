@@ -9,6 +9,7 @@ import dev.icerock.moko.permissions.Permission
 import dev.icerock.moko.permissions.PermissionState
 import dev.icerock.moko.permissions.PermissionsController
 import dev.icerock.moko.permissions.RequestCanceledException
+import dev.icerock.moko.permissions.bluetooth.BLUETOOTH_SCAN
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -56,8 +57,8 @@ class UwbDiscoveryViewModel(
 
     private suspend fun checkAndRequestPermissions(): Boolean {
         return try {
-            // Request both Bluetooth LE and UWB permissions
-            controller.providePermission(Permission.BLUETOOTH_LE)
+            // Request Bluetooth scan permission (needed for BLE scanning)
+            controller.providePermission(Permission.BLUETOOTH_SCAN)
             // Note: You might need to add UWB permission to moko-permissions library
             // or handle it separately using platform-specific code
             permissionState = PermissionState.Granted

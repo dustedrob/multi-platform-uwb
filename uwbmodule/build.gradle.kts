@@ -36,6 +36,8 @@ kotlin {
             implementation(libs.lifecycle.viewmodel)
             api(libs.moko.permissions)
             api(libs.moko.permissions.compose)
+            api(libs.moko.permissions.bluetooth)
+            api(libs.moko.permissions.location)
         }
     }
 }
