@@ -4,7 +4,11 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
     alias(libs.plugins.androidLibrary)
+    `maven-publish`
 }
+
+group = "com.dustedrob.uwb"
+version = "0.1.0"
 
 kotlin {
     androidTarget {
@@ -25,6 +29,9 @@ kotlin {
     }
     
     sourceSets {
+        commonTest.dependencies {
+            implementation(kotlin("test"))
+        }
         androidMain.dependencies {
             implementation(libs.androidx.uwb)
         }
@@ -52,5 +59,32 @@ android {
     }
     lint {
         abortOnError = false
+    }
+}
+
+publishing {
+    publications.withType<MavenPublication> {
+        artifactId = if (artifactId == "uwbmodule") "uwb-multiplatform" else artifactId.replace("uwbmodule", "uwb-multiplatform")
+        pom {
+            name.set("UWB Multiplatform")
+            description.set("Kotlin Multiplatform library for Ultra-Wideband (UWB) device discovery and ranging on Android and iOS.")
+            url.set("https://github.com/dustedrob/multi-platform-uwb")
+            licenses {
+                license {
+                    name.set("Apache License, Version 2.0")
+                    url.set("https://www.apache.org/licenses/LICENSE-2.0.txt")
+                }
+            }
+            developers {
+                developer {
+                    id.set("dustedrob")
+                    name.set("Roberto Betancourt")
+                    email.set("dustedrob@gmail.com")
+                }
+            }
+            scm {
+                url.set("https://github.com/dustedrob/multi-platform-uwb")
+            }
+        }
     }
 }
