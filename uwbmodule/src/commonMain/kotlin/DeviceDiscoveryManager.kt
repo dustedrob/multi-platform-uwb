@@ -104,6 +104,17 @@ class DeviceDiscoveryManager(
     }
 
     /**
+     * Clean up all resources, including UWB manager and BLE manager.
+     * Should be called when the manager is no longer needed (e.g., in ViewModel.onCleared).
+     */
+    fun cleanup() {
+        stopScanning()
+        multiplatformUwbManager.cleanup()
+        bleManager.cleanup()
+        scope.cancel()
+    }
+
+    /**
      * Called when a new device is discovered via BLE scan.
      * Initiates GATT config exchange if we haven't already.
      */

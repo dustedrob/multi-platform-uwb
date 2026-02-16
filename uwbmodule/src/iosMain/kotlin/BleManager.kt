@@ -373,4 +373,18 @@ actual class BleManager {
         centralManager?.connectPeripheral(peripheral, null)
         NSLog("BleManager: Connecting to $peerId for config exchange")
     }
+
+    actual fun cleanup() {
+        stopScanning()
+        stopAdvertising()
+        stopGattServer()
+        discoveredPeripherals.clear()
+        pendingLocalConfig = null
+        pendingPeerId = null
+        deviceDiscoveredCallback = null
+        configExchangedCallback = null
+        centralManager = null
+        peripheralManager = null
+        NSLog("BleManager: Cleanup completed")
+    }
 }

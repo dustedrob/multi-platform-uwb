@@ -141,6 +141,15 @@ actual class MultiplatformUwbManager {
         errorCallback = callback
     }
 
+    actual fun cleanup() {
+        niSession?.invalidate()
+        niSession = null
+        activePeers.clear()
+        localDiscoveryToken = null
+        sessionDelegate = null
+        NSLog("UwbManager: Cleanup completed")
+    }
+
     // ---- Session Delegate ----
 
     private inner class SessionDelegate : NSObject(), NISessionDelegateProtocol {

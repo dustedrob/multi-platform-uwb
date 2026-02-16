@@ -431,4 +431,14 @@ actual class BleManager(private val context: Context) {
             Log.e(TAG, "Error connecting GATT to $peerId: ${e.message}")
         }
     }
+
+    actual fun cleanup() {
+        stopScanning()
+        stopAdvertising()
+        stopGattServer()
+        discoveredDevices.clear()
+        deviceDiscoveredCallback = null
+        configExchangedCallback = null
+        Log.d(TAG, "BLE cleanup completed")
+    }
 }

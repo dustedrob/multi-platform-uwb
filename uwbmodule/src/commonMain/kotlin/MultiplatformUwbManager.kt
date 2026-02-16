@@ -38,4 +38,7 @@ expect class MultiplatformUwbManager {
 
     /** Register callback for errors. */
     fun setErrorCallback(callback: (error: String) -> Unit)
+
+    /** Clean up resources and unbind services. Call when done using the manager. */
+    fun cleanup()
 }

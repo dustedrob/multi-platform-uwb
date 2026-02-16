@@ -157,7 +157,7 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
     }
 
     /** Stop all sessions and clean up resources. */
-    fun cleanup() {
+    actual fun cleanup() {
         activeJobs.values.forEach { it.cancel() }
         activeJobs.clear()
         sessionScope = null

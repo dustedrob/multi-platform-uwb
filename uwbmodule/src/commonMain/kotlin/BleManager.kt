@@ -43,4 +43,7 @@ expect class BleManager {
      * Called with the peer's ID and their [UwbSessionConfig].
      */
     fun setConfigExchangedCallback(callback: (peerId: String, remoteConfig: UwbSessionConfig) -> Unit)
+
+    /** Clean up BLE resources. Call when done using the manager. */
+    fun cleanup()
 }
