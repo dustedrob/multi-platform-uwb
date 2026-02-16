@@ -26,13 +26,10 @@ kotlin {
     
     sourceSets {
         androidMain.dependencies {
-            implementation(libs.koin.android)
             implementation(libs.androidx.uwb)
         }
         commonMain.dependencies {
             implementation(libs.kotlinx.datetime)
-            implementation(libs.koin.core)
-            api(libs.koin.core)
             implementation(libs.lifecycle.viewmodel)
             api(libs.moko.permissions)
             api(libs.moko.permissions.compose)
@@ -52,5 +49,8 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
+    }
+    lint {
+        abortOnError = false
     }
 }

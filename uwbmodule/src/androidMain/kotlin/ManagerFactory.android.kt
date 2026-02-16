@@ -1,3 +1,5 @@
+package com.dustedrob.uwb
+
 import android.content.Context
 import androidx.core.uwb.UwbManager
 

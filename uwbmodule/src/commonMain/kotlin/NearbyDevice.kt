@@ -1,3 +1,5 @@
+package com.dustedrob.uwb
+
 data class NearbyDevice(
     val id: String,
     val name: String,
