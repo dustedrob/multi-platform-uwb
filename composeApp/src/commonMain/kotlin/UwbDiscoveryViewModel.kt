@@ -1,6 +1,8 @@
 import com.dustedrob.uwb.DeviceDiscoveryManager
+import com.dustedrob.uwb.DiscoveryEvent
 import com.dustedrob.uwb.ManagerFactory
 import com.dustedrob.uwb.NearbyDevice
+import com.dustedrob.uwb.UwbSessionConfig
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -36,6 +38,12 @@ class UwbDiscoveryViewModel(
     private val _nearbyDevices = MutableStateFlow<List<NearbyDevice>>(emptyList())
     val nearbyDevices = _nearbyDevices.asStateFlow()
 
+    private val _connectionEvents = MutableStateFlow<List<DiscoveryEvent>>(emptyList())
+    val connectionEvents = _connectionEvents.asStateFlow()
+
+    private val _localConfig = MutableStateFlow<UwbSessionConfig?>(null)
+    val localConfig = _localConfig.asStateFlow()
+
     init {
         // Observe nearby devices
         viewModelScope.launch {
@@ -43,6 +51,16 @@ class UwbDiscoveryViewModel(
                 _nearbyDevices.value = devices
             }
         }
+        // Observe lifecycle events
+        viewModelScope.launch {
+            deviceDiscoveryManager.events.collect { event ->
+                _connectionEvents.value = _connectionEvents.value + event
+            }
+        }
+    }
+
+    fun clearLog() {
+        _connectionEvents.value = emptyList()
     }
 
     fun toggleScanning() {
@@ -52,6 +70,7 @@ class UwbDiscoveryViewModel(
                 if (checkAndRequestPermissions()) {
                     startUwbScanning()
                     _isScanning.value = true
+                    _localConfig.value = deviceDiscoveryManager.getLocalConfig()
                 }
             } else {
                 stopUwbScanning()
@@ -62,12 +81,9 @@ class UwbDiscoveryViewModel(
 
     private suspend fun checkAndRequestPermissions(): Boolean {
         return try {
-            // Request all necessary Bluetooth permissions for BLE scanning, advertising, and connecting
             controller.providePermission(Permission.BLUETOOTH_SCAN)
             controller.providePermission(Permission.BLUETOOTH_ADVERTISE)
             controller.providePermission(Permission.BLUETOOTH_CONNECT)
-            // Note: You might need to add UWB permission to moko-permissions library
-            // or handle it separately using platform-specific code
             permissionState = PermissionState.Granted
             true
         } catch (e: DeniedAlwaysException) {
