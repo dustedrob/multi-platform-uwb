@@ -123,6 +123,44 @@ The library uses a callback-based system to bridge platform-specific implementat
    ./gradlew build
    ```
 
+### Running the Sample App
+
+#### Android
+
+Open the project in Android Studio and run the `composeApp` configuration on a UWB-capable device. No additional signing setup is needed.
+
+#### iOS
+
+**Simulator (no signing required):**
+
+You can run the app on the iOS Simulator without any Apple Developer account or signing configuration:
+
+```bash
+./gradlew :composeApp:iosSimulatorArm64Run
+```
+
+Or open `iosApp/iosApp.xcodeproj` in Xcode and select a simulator target.
+
+> **Note:** UWB (NearbyInteraction) and Bluetooth LE are not available on the simulator. The app will launch and render the UI, but scanning and ranging will not work.
+
+**Physical device (signing required):**
+
+To test on a physical device you need to configure code signing. A free Apple ID works — no paid developer account is needed.
+
+1. Open `iosApp/iosApp.xcodeproj` in Xcode
+2. Select the **iosApp** target → **Signing & Capabilities**
+3. Check **Automatically manage signing**
+4. Under **Team**, select **Add an Account...** and sign in with any Apple ID
+5. It will appear as _"Your Name (Personal Team)"_
+
+Alternatively, set your Team ID in `iosApp/Configuration/Config.xcconfig`:
+
+```
+TEAM_ID=YOUR_TEAM_ID_HERE
+```
+
+Free (Personal Team) provisioning profiles are valid for 7 days and must be renewed by re-building from Xcode.
+
 ### Using the Library Module
 
 To integrate the `uwbmodule` in your own project:
