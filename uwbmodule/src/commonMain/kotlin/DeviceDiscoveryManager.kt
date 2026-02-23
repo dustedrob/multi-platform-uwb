@@ -13,6 +13,8 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Types of lifecycle events emitted during discovery → ranging.
@@ -61,6 +63,9 @@ class DeviceDiscoveryManager(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var cleanupJob: Job? = null
 
+    /** Protects all shared mutable state (device list, peer tracking sets). */
+    private val mutex = Mutex()
+
     /** Peers that have completed config exchange and are ranging or about to range. */
     private val exchangedPeers = mutableSetOf<String>()
 
@@ -74,18 +79,17 @@ class DeviceDiscoveryManager(
     }
 
     init {
-        // When a BLE device is discovered, initiate config exchange
+        // Route all callbacks through the coroutine scope to serialize state access
         bleManager.setDeviceDiscoveredCallback { id, name ->
-            onDeviceDiscovered(id, name)
+            scope.launch { onDeviceDiscovered(id, name) }
         }
 
-        // When config exchange completes, start UWB ranging
         bleManager.setConfigExchangedCallback { peerId, remoteConfig ->
-            onConfigExchanged(peerId, remoteConfig)
+            scope.launch { onConfigExchanged(peerId, remoteConfig) }
         }
 
         multiplatformUwbManager.setRangingCallback { peerId, distance ->
-            onRangingResult(peerId, distance)
+            scope.launch { onRangingResult(peerId, distance) }
         }
 
         multiplatformUwbManager.setErrorCallback { error ->
@@ -96,11 +100,11 @@ class DeviceDiscoveryManager(
     /** Get the local UWB config (address, session ID, channel) for display. */
     fun getLocalConfig(): UwbSessionConfig? = multiplatformUwbManager.getLocalConfig()
 
-    fun startScanning() {
+    suspend fun startScanning() {
         if (isScanning) return
         isScanning = true
 
-        // Initialize UWB first to get local config
+        // Initialize UWB and wait for it to complete before reading local config
         multiplatformUwbManager.initialize()
 
         // Start GATT server so peers can exchange configs with us
@@ -112,11 +116,23 @@ class DeviceDiscoveryManager(
         // Start BLE scanning and advertising
         bleManager.startScanning()
         bleManager.advertise()
+
+        // Start periodic cleanup of stale devices
+        cleanupJob = scope.launch {
+            while (isActive) {
+                delay(CLEANUP_INTERVAL_MS)
+                removeStaleDevices()
+            }
+        }
     }
 
     fun stopScanning() {
         if (!isScanning) return
         isScanning = false
+
+        // Stop stale device cleanup
+        cleanupJob?.cancel()
+        cleanupJob = null
 
         // Stop BLE
         bleManager.stopScanning()
@@ -145,6 +161,22 @@ class DeviceDiscoveryManager(
         scope.cancel()
     }
 
+    private suspend fun removeStaleDevices() = mutex.withLock {
+        val now = getCurrentTimeMillis()
+        val currentDevices = _nearbyDevices.value
+        val (stale, active) = currentDevices.partition { device ->
+            device.state != DeviceState.Ranging && (now - device.lastSeen) > STALE_THRESHOLD_MS
+        }
+        if (stale.isNotEmpty()) {
+            stale.forEach { device ->
+                pendingExchanges.remove(device.id)
+                exchangedPeers.remove(device.id)
+                emitEvent(EventType.Error, device.id, "Device stale, removed: ${device.name}")
+            }
+            _nearbyDevices.value = active
+        }
+    }
+
     private fun emitEvent(type: EventType, peerId: String, message: String) {
         _events.tryEmit(DiscoveryEvent(getCurrentTimeMillis(), type, peerId, message))
     }
@@ -153,13 +185,20 @@ class DeviceDiscoveryManager(
      * Called when a new device is discovered via BLE scan.
      * Initiates GATT config exchange if we haven't already.
      */
-    internal fun onDeviceDiscovered(id: String, name: String) {
+    internal suspend fun onDeviceDiscovered(id: String, name: String) = mutex.withLock {
         // Add to device list if not already present
         val existingDevices = _nearbyDevices.value.toMutableList()
-        if (existingDevices.none { it.id == id }) {
+        val existingIdx = existingDevices.indexOfFirst { it.id == id }
+        if (existingIdx == -1) {
             existingDevices.add(NearbyDevice(id, name, state = DeviceState.Discovered))
             _nearbyDevices.value = existingDevices
             emitEvent(EventType.DeviceDiscovered, id, "BLE device discovered: $name")
+        } else {
+            // Update lastSeen on re-discovery (Bug 10 fix)
+            existingDevices[existingIdx] = existingDevices[existingIdx].copy(
+                lastSeen = getCurrentTimeMillis()
+            )
+            _nearbyDevices.value = existingDevices
         }
 
         // Initiate config exchange if not already done/pending
@@ -168,7 +207,7 @@ class DeviceDiscoveryManager(
             if (localConfig != null) {
                 pendingExchanges.add(id)
                 emitEvent(EventType.ConfigExchangeStarted, id, "Starting GATT config exchange")
-                updateDeviceState(id, DeviceState.ExchangingConfig)
+                updateDeviceStateLocked(id, DeviceState.ExchangingConfig)
                 bleManager.connectAndExchangeConfig(id, localConfig)
             }
         }
@@ -178,44 +217,48 @@ class DeviceDiscoveryManager(
      * Called when BLE GATT config exchange completes with a peer.
      * Starts UWB ranging with the exchanged config.
      */
-    internal fun onConfigExchanged(peerId: String, remoteConfig: UwbSessionConfig) {
-        pendingExchanges.remove(peerId)
-        exchangedPeers.add(peerId)
+    internal suspend fun onConfigExchanged(peerId: String, remoteConfig: UwbSessionConfig) {
+        mutex.withLock {
+            // Guard against duplicate callbacks (both GATT client read and server write fire this)
+            if (peerId in exchangedPeers) return
+            pendingExchanges.remove(peerId)
+            exchangedPeers.add(peerId)
 
-        emitEvent(
-            EventType.ConfigExchangeComplete, peerId,
-            "Config exchanged — session=${remoteConfig.sessionId} ch=${remoteConfig.channel}"
-        )
-
-        // Ensure peer is in our device list and update with config info
-        val existingDevices = _nearbyDevices.value.toMutableList()
-        val idx = existingDevices.indexOfFirst { it.id == peerId }
-        if (idx != -1) {
-            existingDevices[idx] = existingDevices[idx].copy(
-                state = DeviceState.Ranging,
-                sessionId = remoteConfig.sessionId,
-                channel = remoteConfig.channel
+            emitEvent(
+                EventType.ConfigExchangeComplete, peerId,
+                "Config exchanged — session=${remoteConfig.sessionId} ch=${remoteConfig.channel}"
             )
-        } else {
-            existingDevices.add(
-                NearbyDevice(
-                    peerId, "UWB Device",
+
+            // Ensure peer is in our device list and update with config info
+            val existingDevices = _nearbyDevices.value.toMutableList()
+            val idx = existingDevices.indexOfFirst { it.id == peerId }
+            if (idx != -1) {
+                existingDevices[idx] = existingDevices[idx].copy(
                     state = DeviceState.Ranging,
                     sessionId = remoteConfig.sessionId,
                     channel = remoteConfig.channel
                 )
-            )
+            } else {
+                existingDevices.add(
+                    NearbyDevice(
+                        peerId, "UWB Device",
+                        state = DeviceState.Ranging,
+                        sessionId = remoteConfig.sessionId,
+                        channel = remoteConfig.channel
+                    )
+                )
+            }
+            _nearbyDevices.value = existingDevices
+
+            emitEvent(EventType.RangingStarted, peerId, "UWB ranging started")
         }
-        _nearbyDevices.value = existingDevices
 
-        emitEvent(EventType.RangingStarted, peerId, "UWB ranging started")
-
-        // Start UWB ranging with the exchanged config
+        // Start UWB ranging outside the lock (startRanging may take time)
         multiplatformUwbManager.startRanging(peerId, remoteConfig)
     }
 
     /** Called when UWB ranging data is received. */
-    internal fun onRangingResult(peerId: String, distance: Double) {
+    internal suspend fun onRangingResult(peerId: String, distance: Double) = mutex.withLock {
         val existingDevices = _nearbyDevices.value.toMutableList()
         val deviceIndex = existingDevices.indexOfFirst { it.id == peerId }
 
@@ -229,7 +272,8 @@ class DeviceDiscoveryManager(
         }
     }
 
-    private fun updateDeviceState(id: String, state: DeviceState, error: String? = null) {
+    /** Must be called while holding [mutex]. */
+    private fun updateDeviceStateLocked(id: String, state: DeviceState, error: String? = null) {
         val devices = _nearbyDevices.value.toMutableList()
         val idx = devices.indexOfFirst { it.id == id }
         if (idx != -1) {

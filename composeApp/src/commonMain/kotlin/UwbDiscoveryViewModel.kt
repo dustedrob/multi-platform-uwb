@@ -98,12 +98,6 @@ class UwbDiscoveryViewModel(
         }
     }
 
-    fun requestPermissions() {
-        viewModelScope.launch {
-            checkAndRequestPermissions()
-        }
-    }
-
     private suspend fun startUwbScanning() {
         deviceDiscoveryManager.startScanning()
     }

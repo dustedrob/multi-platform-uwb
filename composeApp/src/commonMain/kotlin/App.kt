@@ -18,7 +18,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.Button
-import androidx.compose.material.ButtonDefaults
 import androidx.compose.material.Card
 import androidx.compose.material.Divider
 import androidx.compose.material.MaterialTheme
@@ -74,12 +73,7 @@ fun App() {
 
         // Scan button
         Button(
-            onClick = {
-                viewModel.requestPermissions()
-                if (viewModel.permissionState == PermissionState.Granted) {
-                    viewModel.toggleScanning()
-                }
-            },
+            onClick = { viewModel.toggleScanning() },
             modifier = Modifier.fillMaxWidth()
         ) {
             Text(if (isScanning) "Stop Scanning" else "Start Scanning")

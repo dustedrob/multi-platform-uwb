@@ -25,9 +25,8 @@ actual class BleManager {
     // Track discovered peripherals for GATT client connections
     private val discoveredPeripherals = mutableMapOf<String, CBPeripheral>()
 
-    // Pending config exchange state
-    private var pendingLocalConfig: UwbSessionConfig? = null
-    private var pendingPeerId: String? = null
+    // Pending config exchanges, keyed by peripheral UUID
+    private val pendingConfigs = mutableMapOf<String, UwbSessionConfig>()
 
     // Deferred operations waiting for poweredOn
     private var scanWhenReady = false
@@ -140,10 +139,10 @@ actual class BleManager {
             }
 
             if (didUpdateValueForCharacteristic.UUID == configReadUUID) {
+                val peerId = peripheral.identifier.UUIDString
                 val data = didUpdateValueForCharacteristic.value
                 if (data != null) {
                     val remoteConfig = UwbSessionConfig.fromByteArray(data.toByteArray())
-                    val peerId = peripheral.identifier.UUIDString
 
                     if (remoteConfig != null) {
                         NSLog("BleManager: Received config from $peerId")
@@ -154,7 +153,7 @@ actual class BleManager {
                 }
 
                 // Step 2: Write our config to the peer (using WriteWithoutResponse to avoid needing didWriteValue callback)
-                val localCfg = pendingLocalConfig
+                val localCfg = pendingConfigs[peerId]
                 if (localCfg != null) {
                     val service = peripheral.services?.firstOrNull {
                         (it as? CBService)?.UUID == serviceUUID
@@ -172,8 +171,7 @@ actual class BleManager {
                 }
                 // Exchange complete, disconnect
                 centralManager?.cancelPeripheralConnection(peripheral)
-                pendingLocalConfig = null
-                pendingPeerId = null
+                pendingConfigs.remove(peerId)
             }
         }
         // Note: didWriteValueForCharacteristic omitted to avoid ObjC selector conflict
@@ -266,8 +264,9 @@ actual class BleManager {
     // ---- Public API: Scanning ----
 
     actual fun startScanning() {
-        val central = CBCentralManager(centralDelegate, null)
-        centralManager = central
+        val central = centralManager ?: CBCentralManager(centralDelegate, null).also {
+            centralManager = it
+        }
 
         if (central.state == CBManagerStatePoweredOn) {
             central.scanForPeripheralsWithServices(listOf(serviceUUID), null)
@@ -367,8 +366,7 @@ actual class BleManager {
             return
         }
 
-        pendingLocalConfig = localConfig
-        pendingPeerId = peerId
+        pendingConfigs[peerId] = localConfig
 
         centralManager?.connectPeripheral(peripheral, null)
         NSLog("BleManager: Connecting to $peerId for config exchange")
@@ -379,8 +377,7 @@ actual class BleManager {
         stopAdvertising()
         stopGattServer()
         discoveredPeripherals.clear()
-        pendingLocalConfig = null
-        pendingPeerId = null
+        pendingConfigs.clear()
         deviceDiscoveredCallback = null
         configExchangedCallback = null
         centralManager = null

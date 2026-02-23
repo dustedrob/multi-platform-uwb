@@ -11,7 +11,7 @@ package com.dustedrob.uwb
  */
 expect class MultiplatformUwbManager {
     /** Initialize the UWB subsystem. Must be called before [getLocalConfig]. */
-    fun initialize()
+    suspend fun initialize()
 
     /**
      * Get the local UWB session configuration to share with peers via BLE.

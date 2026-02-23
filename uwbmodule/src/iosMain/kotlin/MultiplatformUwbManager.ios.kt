@@ -32,7 +32,7 @@ actual class MultiplatformUwbManager {
     /** Strong reference to delegate to prevent GC. */
     private var sessionDelegate: SessionDelegate? = null
 
-    actual fun initialize() {
+    actual suspend fun initialize() {
         if (!NISession.isSupported()) {
             errorCallback?.invoke("NearbyInteraction not supported on this device")
             return
@@ -159,9 +159,11 @@ actual class MultiplatformUwbManager {
                 didUpdateNearbyObjects.forEach { obj ->
                     if (obj is NINearbyObject) {
                         val distance = obj.distance.toDouble()
-                        val peerId = activePeers.entries
-                            .find { it.value == obj.discoveryToken }?.key ?: "unknown"
-                        rangingCallback?.invoke(peerId, distance)
+                        if (!distance.isNaN()) {
+                            val peerId = activePeers.entries
+                                .find { it.value == obj.discoveryToken }?.key ?: "unknown"
+                            rangingCallback?.invoke(peerId, distance)
+                        }
                     }
                 }
             }

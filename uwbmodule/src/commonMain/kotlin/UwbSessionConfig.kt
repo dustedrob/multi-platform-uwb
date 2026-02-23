@@ -72,11 +72,13 @@ data class UwbSessionConfig(
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other !is UwbSessionConfig) return false
+        val thisToken = discoveryToken ?: ByteArray(0)
+        val otherToken = other.discoveryToken ?: ByteArray(0)
         return sessionId == other.sessionId &&
                 channel == other.channel &&
                 preambleIndex == other.preambleIndex &&
                 uwbAddress.contentEquals(other.uwbAddress) &&
-                (discoveryToken?.contentEquals(other.discoveryToken ?: ByteArray(0)) ?: (other.discoveryToken == null))
+                thisToken.contentEquals(otherToken)
     }
 
     override fun hashCode(): Int {
@@ -92,7 +94,7 @@ data class UwbSessionConfig(
         private const val PROTOCOL_VERSION: Byte = 1
 
         fun fromByteArray(bytes: ByteArray): UwbSessionConfig? {
-            if (bytes.size < 15) return null // minimum size: 1+4+4+4+2+0+2+0 = 17... but be lenient
+            if (bytes.size < 17) return null // minimum: 1(ver) + 4(sid) + 4(ch) + 4(pre) + 2(addrLen) + 2(tokLen)
             var pos = 0
 
             val version = bytes[pos++]

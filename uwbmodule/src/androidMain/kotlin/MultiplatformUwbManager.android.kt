@@ -35,24 +35,22 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
         const val DEFAULT_PREAMBLE_INDEX = 10
     }
 
-    actual fun initialize() {
-        androidUwbManager?.let { uwbManager ->
-            coroutineScope.launch {
-                try {
-                    val scope = uwbManager.controleeSessionScope()
-                    sessionScope = scope
-
-                    val capabilities = scope.rangingCapabilities
-                    if (!capabilities.isDistanceSupported) {
-                        errorCallback?.invoke("UWB distance ranging not supported")
-                    }
-                    Log.d(TAG, "UWB initialized. Local address: ${scope.localAddress}")
-                } catch (e: Exception) {
-                    errorCallback?.invoke("Failed to initialize UWB: ${e.message}")
-                }
-            }
-        } ?: run {
+    actual suspend fun initialize() {
+        if (androidUwbManager == null) {
             errorCallback?.invoke("UWB not supported on this device")
+            return
+        }
+        try {
+            val scope = androidUwbManager.controleeSessionScope()
+            sessionScope = scope
+
+            val capabilities = scope.rangingCapabilities
+            if (!capabilities.isDistanceSupported) {
+                errorCallback?.invoke("UWB distance ranging not supported")
+            }
+            Log.d(TAG, "UWB initialized. Local address: ${scope.localAddress}")
+        } catch (e: Exception) {
+            errorCallback?.invoke("Failed to initialize UWB: ${e.message}")
         }
     }
 
