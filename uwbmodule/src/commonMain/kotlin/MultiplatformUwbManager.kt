@@ -34,7 +34,7 @@ expect class MultiplatformUwbManager {
     fun stopRanging(peerId: String)
 
     /** Register callback for ranging distance updates. */
-    fun setRangingCallback(callback: (peerId: String, distance: Double) -> Unit)
+    fun setRangingCallback(callback: (peerId: String, distance: Double, azimuth: Double?, elevation: Double?) -> Unit)
 
     /** Register callback for errors. */
     fun setErrorCallback(callback: (error: String) -> Unit)

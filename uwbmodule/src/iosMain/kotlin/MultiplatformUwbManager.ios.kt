@@ -7,6 +7,7 @@ import platform.Foundation.NSKeyedArchiver
 import platform.Foundation.NSKeyedUnarchiver
 import platform.Foundation.NSLog
 import platform.NearbyInteraction.NIAlgorithmConvergence
+import platform.NearbyInteraction.NIAlgorithmConvergenceStatus
 import platform.NearbyInteraction.NIDiscoveryToken
 import platform.NearbyInteraction.NINearbyObject
 import platform.NearbyInteraction.NINearbyObjectRemovalReason
@@ -20,7 +21,7 @@ import platform.darwin.dispatch_get_main_queue
 @OptIn(ExperimentalForeignApi::class)
 actual class MultiplatformUwbManager {
     private var niSession: NISession? = null
-    private var rangingCallback: ((String, Double) -> Unit)? = null
+    private var rangingCallback: ((String, Double, Double?, Double?) -> Unit)? = null
     private var errorCallback: ((String) -> Unit)? = null
 
     /** Maps peer ID → the token we received from that peer. */
@@ -121,6 +122,46 @@ actual class MultiplatformUwbManager {
         // Create a peer configuration with the exchanged token
         val config = NINearbyPeerConfiguration(peerToken)
 
+
+        /* on IOS, for required camera convergence in ios16+ on supported phones, iPhone 14+ 
+
+        first byte of data from remote device identifies data content
+
+        case .accessoryConfigurationData:
+        let message = data.advanced(by: 1)
+
+        setupAccessory(message, name: accessoryName, deviceID: deviceID)
+
+         func setupAccessory(_ configData: Data, name: String, deviceID: Int) {
+
+    
+        do {
+            accessory.configuration = try NINearbyAccessoryConfiguration(data: configData) <--- similar to above
+
+            if(!(NISession.deviceCapabilities.supportsDirectionMeasurement)){
+
+                NSLog("UwbManager - device does not support direction measurement");
+
+                if(NISession.deviceCapabilities.supportsCameraAssistance){
+
+                    NSLog("UwbManager - device DOES support camera assistance, requesting assistance")
+                    accessory.configuration?.isCameraAssistanceEnabled = true
+                } else {
+                    NSLog("UwbManager - device DOES NOT support camera assistance")
+                }
+            } else {
+                 NSLog("UwbManager - device DOES support direction measurement");
+            }
+
+        }
+        catch {
+            // Stop and display the issue because the incoming data is invalid.
+            // In your app, debug the accessory data to ensure an expected
+            // format.
+            return
+        } */
+
+
         NSLog("UwbManager: Starting ranging with $peerId")
         session.runWithConfiguration(config)
     }
@@ -133,7 +174,7 @@ actual class MultiplatformUwbManager {
         }
     }
 
-    actual fun setRangingCallback(callback: (peerId: String, distance: Double) -> Unit) {
+    actual fun setRangingCallback(callback: (peerId: String, distance: Double, azimuth: Double?, elevation: Double?) -> Unit) {
         rangingCallback = callback
     }
 
@@ -157,12 +198,12 @@ actual class MultiplatformUwbManager {
         override fun session(session: NISession, didUpdateNearbyObjects: List<*>) {
             dispatchToMain {
                 didUpdateNearbyObjects.forEach { obj ->
-                    if (obj is NINearbyObject) {
+                    if (obj is NINearbyObject) {                        
                         val distance = obj.distance.toDouble()
                         if (!distance.isNaN()) {
                             val peerId = activePeers.entries
                                 .find { it.value == obj.discoveryToken }?.key ?: "unknown"
-                            rangingCallback?.invoke(peerId, distance)
+                            rangingCallback?.invoke(peerId, distance, obj.horizontalAngle().toDouble(), obj.verticalDirectionEstimate().toDouble())
                         }
                     }
                 }
@@ -212,7 +253,60 @@ actual class MultiplatformUwbManager {
             didUpdateAlgorithmConvergence: NIAlgorithmConvergence,
             forObject: NINearbyObject?
         ) {
-            // Algorithm convergence update — informational
+            // Algorithm convergence update — NOT informational
+            when (didUpdateAlgorithmConvergence.status){
+                NIAlgorithmConvergenceStatus.NIAlgorithmConvergenceStatusConverged -> print("converged")
+
+                NIAlgorithmConvergenceStatus.NIAlgorithmConvergenceStatusNotConverged-> {
+                    print("not converged")
+                    when (didUpdateAlgorithmConvergence.status) {
+
+                      /*  NIAlgorithmConvergenceStatus.entries.toTypedArray().first { insufficientLighting }   -> print("more light")
+
+                        NIAlgorithmConvergenceStatus.Reason.insufficientHorizontalSweep -> print("move left/right")
+
+                        NIAlgorithmConvergenceStatus.Reason.insufficientVerticalSweep -> print("move up/down") */
+
+                        else -> print("unexpected status")
+                    }
+                }
+                else -> print("oops")
+
+            }
+            /*  switch convergence.status {
+                case .converged:
+                    print("Horizontal Angle: \(String(describing: accessory.horizontalAngle))")
+                    print("verticalDirectionEstimate: \(accessory.verticalDirectionEstimate)")
+                    //infoLabelUpdate(with: "Converged")
+                    updatedDevice.isConverged = true
+                    break;
+                case .notConverged([NIAlgorithmConvergenceStatus.Reason.insufficientLighting]):
+                    print("not converged: More light required")
+                    updatedDevice.isConverged = false
+                    let parms = ["name": accessoryMap[accessory.discoveryToken] ?? "Unknown",
+                             "type": "PositionStatus",
+                             "message":" Insufficient Lighting"
+                    ]
+                    self.NotifyCallback!("UWBInfo", parms );
+                    break;
+                default:
+                    print(" not converged")//infoLabelUpdate(with: "Try moving in a different direction...")
+                    var message="" 
+                    switch(convergence.status){
+                        case .notConverged([NIAlgorithmConvergenceStatus.Reason.insufficientHorizontalSweep]):
+                           message = "need Horizontal Sweep"
+                        case .notConverged([NIAlgorithmConvergenceStatus.Reason.insufficientVerticalSweep]):   
+                           message = "need Vertical Sweep"
+                        default:
+                           message=""   
+                    }
+                    let parms = ["name": accessoryMap[accessory.discoveryToken] ?? "Unknown",
+                             "type": "PositionStatus",
+                             "message":message
+                    ] 
+                    // inform upper user that phone needs to move around
+                    self.NotifyCallback!("UWBInfo", parms );
+            } */
         }
 
         override fun sessionDidStartRunning(session: NISession) {

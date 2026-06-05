@@ -15,6 +15,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+//import androidx.core.uwb.RangingResult
 
 /**
  * Types of lifecycle events emitted during discovery → ranging.
@@ -37,6 +38,7 @@ data class DiscoveryEvent(
     val peerId: String,
     val message: String
 )
+
 
 /**
  * Orchestrates the full device discovery → BLE config exchange → UWB ranging pipeline.
@@ -88,8 +90,8 @@ class DeviceDiscoveryManager(
             scope.launch { onConfigExchanged(peerId, remoteConfig) }
         }
 
-        multiplatformUwbManager.setRangingCallback { peerId, distance ->
-            scope.launch { onRangingResult(peerId, distance) }
+        multiplatformUwbManager.setRangingCallback { peerId , distance , azimuth, elevation ->
+            scope.launch { onRangingResult(peerId, distance, azimuth, elevation ) }
         }
 
         multiplatformUwbManager.setErrorCallback { error ->
@@ -258,13 +260,15 @@ class DeviceDiscoveryManager(
     }
 
     /** Called when UWB ranging data is received. */
-    internal suspend fun onRangingResult(peerId: String, distance: Double) = mutex.withLock {
+    internal suspend fun onRangingResult(peerId: String, distance: Double, azimuth: Double?, elevation: Double?) = mutex.withLock {
         val existingDevices = _nearbyDevices.value.toMutableList()
         val deviceIndex = existingDevices.indexOfFirst { it.id == peerId }
 
-        if (deviceIndex != -1) {
-            existingDevices[deviceIndex] = existingDevices[deviceIndex].copy(
+        if (deviceIndex != -1) {                        
+            existingDevices[deviceIndex] = existingDevices[deviceIndex].copy(                
                 distance = distance,
+                azimuth = azimuth,
+                elevation = elevation,
                 lastSeen = getCurrentTimeMillis(),
                 state = DeviceState.Ranging
             )
