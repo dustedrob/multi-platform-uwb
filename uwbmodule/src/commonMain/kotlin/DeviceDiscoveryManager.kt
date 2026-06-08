@@ -15,7 +15,6 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-//import androidx.core.uwb.RangingResult
 
 /**
  * Types of lifecycle events emitted during discovery → ranging.
