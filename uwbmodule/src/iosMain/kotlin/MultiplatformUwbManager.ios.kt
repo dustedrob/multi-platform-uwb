@@ -1,11 +1,13 @@
 package com.dustedrob.uwb
 
 import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.useContents
 import platform.Foundation.NSData
 import platform.Foundation.NSError
 import platform.Foundation.NSKeyedArchiver
 import platform.Foundation.NSKeyedUnarchiver
 import platform.Foundation.NSLog
+import platform.Foundation.NSProcessInfo
 import platform.NearbyInteraction.NIAlgorithmConvergence
 import platform.NearbyInteraction.NIAlgorithmConvergenceStatus
 import platform.NearbyInteraction.NIAlgorithmConvergenceStatusReasonInsufficientHorizontalSweep
@@ -27,6 +29,13 @@ actual class MultiplatformUwbManager {
     private var niSession: NISession? = null
     private var rangingCallback: ((String, Double, Double?, Double?) -> Unit)? = null
     private var errorCallback: ((String) -> Unit)? = null
+
+    /**
+     * NearbyInteraction direction APIs (`horizontalAngle`, `verticalDirectionEstimate`) are iOS 16+.
+     * Calling them on iOS 14/15 is an unrecognized selector and crashes, so gate on the OS version.
+     */
+    private val directionApiAvailable: Boolean =
+        NSProcessInfo.processInfo.operatingSystemVersion.useContents { majorVersion >= 16 }
 
     /** Maps peer ID → the token we received from that peer. */
     private val activePeers = mutableMapOf<String, NIDiscoveryToken>()
@@ -162,12 +171,25 @@ actual class MultiplatformUwbManager {
         override fun session(session: NISession, didUpdateNearbyObjects: List<*>) {
             dispatchToMain {
                 didUpdateNearbyObjects.forEach { obj ->
-                    if (obj is NINearbyObject) {                        
+                    if (obj is NINearbyObject) {
                         val distance = obj.distance.toDouble()
                         if (!distance.isNaN()) {
                             val peerId = activePeers.entries
                                 .find { it.value == obj.discoveryToken }?.key ?: "unknown"
-                            rangingCallback?.invoke(peerId, distance, obj.horizontalAngle().toDouble(), obj.verticalDirectionEstimate().toDouble())
+
+                            // Azimuth (`horizontalAngle`) is iOS 16+ and is NaN until camera-assistance
+                            // convergence, so only emit it when available and valid.
+                            val azimuth: Double? =
+                                if (directionApiAvailable) {
+                                    obj.horizontalAngle.let { if (it.isNaN()) null else it.toDouble() }
+                                } else {
+                                    null
+                                }
+
+                            // NearbyInteraction exposes no elevation angle — `verticalDirectionEstimate`
+                            // is a direction category (above/below/same), not a measurement — so we
+                            // leave elevation null on iOS rather than emit a meaningless value.
+                            rangingCallback?.invoke(peerId, distance, azimuth, null)
                         }
                     }
                 }
