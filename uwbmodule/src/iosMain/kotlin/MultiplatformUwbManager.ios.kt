@@ -8,6 +8,10 @@ import platform.Foundation.NSKeyedUnarchiver
 import platform.Foundation.NSLog
 import platform.NearbyInteraction.NIAlgorithmConvergence
 import platform.NearbyInteraction.NIAlgorithmConvergenceStatus
+import platform.NearbyInteraction.NIAlgorithmConvergenceStatusReasonInsufficientHorizontalSweep
+import platform.NearbyInteraction.NIAlgorithmConvergenceStatusReasonInsufficientLighting
+import platform.NearbyInteraction.NIAlgorithmConvergenceStatusReasonInsufficientMovement
+import platform.NearbyInteraction.NIAlgorithmConvergenceStatusReasonInsufficientVerticalSweep
 import platform.NearbyInteraction.NIDiscoveryToken
 import platform.NearbyInteraction.NINearbyObject
 import platform.NearbyInteraction.NINearbyObjectRemovalReason
@@ -213,16 +217,37 @@ actual class MultiplatformUwbManager {
             didUpdateAlgorithmConvergence: NIAlgorithmConvergence,
             forObject: NINearbyObject?
         ) {
-            // Algorithm convergence update — informational
-            when (didUpdateAlgorithmConvergence.status){
-                NIAlgorithmConvergenceStatus.NIAlgorithmConvergenceStatusConverged -> print("converged")
+            // Algorithm convergence update.
+            //
+            // NOTE: `NIAlgorithmConvergenceStatusReason` is NOT an enum — it is declared as
+            // `typedef NSString * NIAlgorithmConvergenceStatusReason NS_TYPED_ENUM`, so there is no
+            // type/enum-class to import. The reasons are NSString constants, and `convergence.reasons`
+            // (NSArray<NIAlgorithmConvergenceStatusReason>) comes through to Kotlin/Native as a
+            // List<*> of String. (The property is NS_SWIFT_UNAVAILABLE, but is exposed to K/N via the
+            // Obj-C surface.) We therefore compare the entries against the imported string constants.
+            when (didUpdateAlgorithmConvergence.status) {
+                NIAlgorithmConvergenceStatus.NIAlgorithmConvergenceStatusConverged ->
+                    NSLog("UwbManager: convergence converged — angles are valid")
 
-                NIAlgorithmConvergenceStatus.NIAlgorithmConvergenceStatusNotConverged-> {
-                    print("not converged")
-                 
+                NIAlgorithmConvergenceStatus.NIAlgorithmConvergenceStatusNotConverged -> {
+                    didUpdateAlgorithmConvergence.reasons.forEach { reason ->
+                        val message = when (reason as? String) {
+                            NIAlgorithmConvergenceStatusReasonInsufficientLighting ->
+                                "needs more light"
+                            NIAlgorithmConvergenceStatusReasonInsufficientHorizontalSweep ->
+                                "move device left/right"
+                            NIAlgorithmConvergenceStatusReasonInsufficientVerticalSweep ->
+                                "move device up/down"
+                            NIAlgorithmConvergenceStatusReasonInsufficientMovement ->
+                                "move around"
+                            else -> "try moving in a different direction"
+                        }
+                        NSLog("UwbManager: convergence not converged — $message")
+                    }
                 }
-                else -> print("oops, should only be converged or not")
-            }           
+
+                else -> NSLog("UwbManager: convergence status unknown")
+            }
         }
 
         override fun sessionDidStartRunning(session: NISession) {
