@@ -39,6 +39,7 @@ The library combines **Bluetooth Low Energy (BLE)** for initial device discovery
 
 - **BLE Device Discovery**: Automatic scanning and advertising for UWB-capable devices
 - **Precise UWB Ranging**: Real-time distance measurements with centimeter-level accuracy
+- **Angle of Arrival**: Azimuth/elevation alongside distance, where the hardware supports it. Currently functional on Android (devices with AoA-capable antennas); on iOS, azimuth requires iOS 16+ with Camera Assistance (work in progress — see below), and elevation is not exposed by NearbyInteraction
 - **Cross-Platform API**: Unified interface for both Android and iOS platforms
 - **Reactive Data Flow**: Kotlin Flow-based real-time updates for device discovery and ranging
 - **Permission Management**: Integrated permission handling for BLE and UWB access
@@ -304,7 +305,9 @@ Data class representing a discovered device.
 data class NearbyDevice(
     val id: String,
     val name: String,
-    val distance: Double? = null,
+    val distance: Double? = null,   // meters
+    val azimuth: Double? = null,    // horizontal angle; null when unavailable
+    val elevation: Double? = null,  // vertical angle; null when unavailable (always null on iOS)
     val lastSeen: Long
 )
 ```
@@ -317,7 +320,9 @@ expect class MultiplatformUwbManager {
     fun initialize()
     fun startRanging(peerId: String)
     fun stopRanging(peerId: String)
-    fun setRangingCallback(callback: (peerId: String, distance: Double) -> Unit)
+    fun setRangingCallback(
+        callback: (peerId: String, distance: Double, azimuth: Double?, elevation: Double?) -> Unit
+    )
     fun setErrorCallback(callback: (error: String) -> Unit)
 }
 ```
