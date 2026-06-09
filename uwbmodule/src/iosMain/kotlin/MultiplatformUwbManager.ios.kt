@@ -7,6 +7,11 @@ import platform.Foundation.NSKeyedArchiver
 import platform.Foundation.NSKeyedUnarchiver
 import platform.Foundation.NSLog
 import platform.NearbyInteraction.NIAlgorithmConvergence
+import platform.NearbyInteraction.NIAlgorithmConvergenceStatus
+import platform.NearbyInteraction.NIAlgorithmConvergenceStatusReasonInsufficientHorizontalSweep
+import platform.NearbyInteraction.NIAlgorithmConvergenceStatusReasonInsufficientLighting
+import platform.NearbyInteraction.NIAlgorithmConvergenceStatusReasonInsufficientMovement
+import platform.NearbyInteraction.NIAlgorithmConvergenceStatusReasonInsufficientVerticalSweep
 import platform.NearbyInteraction.NIDiscoveryToken
 import platform.NearbyInteraction.NINearbyObject
 import platform.NearbyInteraction.NINearbyObjectRemovalReason
@@ -20,7 +25,7 @@ import platform.darwin.dispatch_get_main_queue
 @OptIn(ExperimentalForeignApi::class)
 actual class MultiplatformUwbManager {
     private var niSession: NISession? = null
-    private var rangingCallback: ((String, Double) -> Unit)? = null
+    private var rangingCallback: ((String, Double, Double?, Double?) -> Unit)? = null
     private var errorCallback: ((String) -> Unit)? = null
 
     /** Maps peer ID → the token we received from that peer. */
@@ -133,7 +138,7 @@ actual class MultiplatformUwbManager {
         }
     }
 
-    actual fun setRangingCallback(callback: (peerId: String, distance: Double) -> Unit) {
+    actual fun setRangingCallback(callback: (peerId: String, distance: Double, azimuth: Double?, elevation: Double?) -> Unit) {
         rangingCallback = callback
     }
 
@@ -157,12 +162,12 @@ actual class MultiplatformUwbManager {
         override fun session(session: NISession, didUpdateNearbyObjects: List<*>) {
             dispatchToMain {
                 didUpdateNearbyObjects.forEach { obj ->
-                    if (obj is NINearbyObject) {
+                    if (obj is NINearbyObject) {                        
                         val distance = obj.distance.toDouble()
                         if (!distance.isNaN()) {
                             val peerId = activePeers.entries
                                 .find { it.value == obj.discoveryToken }?.key ?: "unknown"
-                            rangingCallback?.invoke(peerId, distance)
+                            rangingCallback?.invoke(peerId, distance, obj.horizontalAngle().toDouble(), obj.verticalDirectionEstimate().toDouble())
                         }
                     }
                 }
@@ -212,7 +217,37 @@ actual class MultiplatformUwbManager {
             didUpdateAlgorithmConvergence: NIAlgorithmConvergence,
             forObject: NINearbyObject?
         ) {
-            // Algorithm convergence update — informational
+            // Algorithm convergence update.
+            //
+            // NOTE: `NIAlgorithmConvergenceStatusReason` is NOT an enum — it is declared as
+            // `typedef NSString * NIAlgorithmConvergenceStatusReason NS_TYPED_ENUM`, so there is no
+            // type/enum-class to import. The reasons are NSString constants, and `convergence.reasons`
+            // (NSArray<NIAlgorithmConvergenceStatusReason>) comes through to Kotlin/Native as a
+            // List<*> of String. (The property is NS_SWIFT_UNAVAILABLE, but is exposed to K/N via the
+            // Obj-C surface.) We therefore compare the entries against the imported string constants.
+            when (didUpdateAlgorithmConvergence.status) {
+                NIAlgorithmConvergenceStatus.NIAlgorithmConvergenceStatusConverged ->
+                    NSLog("UwbManager: convergence converged — angles are valid")
+
+                NIAlgorithmConvergenceStatus.NIAlgorithmConvergenceStatusNotConverged -> {
+                    didUpdateAlgorithmConvergence.reasons.forEach { reason ->
+                        val message = when (reason as? String) {
+                            NIAlgorithmConvergenceStatusReasonInsufficientLighting ->
+                                "needs more light"
+                            NIAlgorithmConvergenceStatusReasonInsufficientHorizontalSweep ->
+                                "move device left/right"
+                            NIAlgorithmConvergenceStatusReasonInsufficientVerticalSweep ->
+                                "move device up/down"
+                            NIAlgorithmConvergenceStatusReasonInsufficientMovement ->
+                                "move around"
+                            else -> "try moving in a different direction"
+                        }
+                        NSLog("UwbManager: convergence not converged — $message")
+                    }
+                }
+
+                else -> NSLog("UwbManager: convergence status unknown")
+            }
         }
 
         override fun sessionDidStartRunning(session: NISession) {

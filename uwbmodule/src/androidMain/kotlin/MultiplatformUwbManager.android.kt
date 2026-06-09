@@ -19,7 +19,7 @@ import kotlinx.coroutines.launch
 actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? = null) {
     private val TAG = "UwbManager"
 
-    private var rangingCallback: ((String, Double) -> Unit)? = null
+    private var rangingCallback: ((String, Double, Double?, Double?) -> Unit)? = null
     private var errorCallback: ((String) -> Unit)? = null
     private val coroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
@@ -111,7 +111,10 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
                     updateRateType = RangingParameters.RANGING_UPDATE_RATE_AUTOMATIC
                 )
 
-                Log.d(TAG, "Starting ranging with $peerId — session=$agreedSessionId ch=${remoteConfig.channel}")
+                Log.d(
+                    TAG,
+                    "Starting ranging with $peerId — session=$agreedSessionId ch=${remoteConfig.channel}"
+                )
 
                 scope.prepareSession(rangingParameters)
                     .catch { exception ->
@@ -122,9 +125,15 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
                             is RangingResult.RangingResultPosition -> {
                                 val distance = result.position.distance?.value
                                 if (distance != null) {
-                                    rangingCallback?.invoke(peerId, distance.toDouble())
+                                    rangingCallback?.invoke(
+                                        peerId,
+                                        distance.toDouble(),
+                                        result.position.azimuth?.value?.toDouble(),
+                                        result.position.elevation?.value?.toDouble()
+                                    )
                                 }
                             }
+
                             is RangingResult.RangingResultPeerDisconnected -> {
                                 errorCallback?.invoke("Peer $peerId disconnected")
                                 activeJobs.remove(peerId)
@@ -146,7 +155,7 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
         }
     }
 
-    actual fun setRangingCallback(callback: (peerId: String, distance: Double) -> Unit) {
+    actual fun setRangingCallback(callback: (peerId: String, distance: Double, azimuth: Double?, elevation: Double?) -> Unit) {
         rangingCallback = callback
     }
 
