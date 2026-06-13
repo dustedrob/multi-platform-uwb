@@ -242,12 +242,23 @@ actual class BleManager(private val context: Context) {
                 .setConnectable(true)
                 .build()
 
+            // The primary advertisement carries only the service UUID. The device
+            // name goes in the scan response: a 128-bit service UUID already uses
+            // 18 of the 31-byte legacy advertisement budget, so including the name
+            // here too overflows it and fails with ADVERTISE_FAILED_DATA_TOO_LARGE
+            // (error code 1). This matters because UWB-interop UUIDs (Nordic UART,
+            // Qorvo NI) are full 128-bit values, unlike the base-UUID-derived FFF0
+            // which Android compresses to 2 bytes.
             val data = AdvertiseData.Builder()
-                .setIncludeDeviceName(true)
+                .setIncludeDeviceName(false)
                 .addServiceUuid(ParcelUuid(SERVICE_UUID))
                 .build()
 
-            advertiser.startAdvertising(settings, data, advertiseCallback)
+            val scanResponse = AdvertiseData.Builder()
+                .setIncludeDeviceName(true)
+                .build()
+
+            advertiser.startAdvertising(settings, data, scanResponse, advertiseCallback)
             Log.d(TAG, "BLE advertising started")
         } catch (e: Exception) {
             Log.e(TAG, "Error starting BLE advertising: ${e.message}")
