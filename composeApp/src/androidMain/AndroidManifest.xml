@@ -3,7 +3,11 @@
     <!-- Bluetooth permissions -->
     <uses-permission android:name="android.permission.BLUETOOTH" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
-    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+    <!-- Scan filters by service UUID and never derives physical location, so we
+         assert neverForLocation; this frees Android 12+ from requiring Location
+         Services to be enabled for BLE scan results. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     
@@ -11,8 +15,10 @@
     <uses-permission android:name="android.permission.UWB_RANGING" />
     
     <!-- Location permission (required for Bluetooth scanning) -->
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Location is only required for BLE scanning on Android 11 (API 30) and below;
+         on Android 12+ the neverForLocation flag above removes this requirement. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"
+        android:maxSdkVersion="30" />
     
     <!-- Hardware features -->
     <uses-feature 
