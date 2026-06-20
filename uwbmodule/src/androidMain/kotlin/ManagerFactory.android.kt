@@ -9,7 +9,7 @@ actual class ManagerFactory(private val context: Context) {
         return MultiplatformUwbManager(uwbManager)
     }
 
-    actual fun createBleManager(): BleManager {
-        return BleManager(context)
+    actual fun createBleManager(config: BleDiscoveryConfig): BleManager {
+        return BleManager(context, config)
     }
 }

@@ -6,11 +6,9 @@ import platform.Foundation.*
 import platform.darwin.NSObject
 
 @OptIn(ExperimentalForeignApi::class)
-actual class BleManager {
-
-    private val serviceUUID = CBUUID.UUIDWithString(GattUuids.UWB_DISCOVERY_SERVICE_UUID)
-    private val configReadUUID = CBUUID.UUIDWithString(GattUuids.UWB_CONFIG_CHAR_UUID)
-    private val configWriteUUID = CBUUID.UUIDWithString(GattUuids.UWB_CONFIG_WRITE_CHAR_UUID)
+actual class BleManager(
+    private val config: BleDiscoveryConfig = BleDiscoveryConfig(),
+) {
 
     private var centralManager: CBCentralManager? = null
     private var peripheralManager: CBPeripheralManager? = null
@@ -23,7 +21,11 @@ actual class BleManager {
     private var readCharacteristic: CBMutableCharacteristic? = null
 
     // Track discovered peripherals for GATT client connections
-    private val discoveredPeripherals = mutableMapOf<String, CBPeripheral>()
+    private data class  accessoryDevice (
+        val bleDevice: CBPeripheral? = null,
+        val service: ServiceEntry?=null
+    )
+    private val discoveredPeripherals = mutableMapOf<String, accessoryDevice>()
 
     // Pending config exchanges, keyed by peripheral UUID
     private val pendingConfigs = mutableMapOf<String, UwbSessionConfig>()
@@ -31,6 +33,33 @@ actual class BleManager {
     // Deferred operations waiting for poweredOn
     private var scanWhenReady = false
     private var advertiseWhenReady = false
+    private var gattServerWhenReady = false
+
+    fun addGattService(index: Int){
+        val entry = config.profiles[index]
+
+        // Read-only for now; accessory-protocol tx-notify is future work (would add CBCharacteristicPropertyNotify).
+        val readChar = CBMutableCharacteristic(
+            type = CBUUID.UUIDWithString(entry.readFromUUID),
+            properties = CBCharacteristicPropertyRead,
+            value = null, // Dynamic value — served via delegate
+            permissions = CBAttributePermissionsReadable
+        )
+        readCharacteristic = readChar
+
+        val writeChar = CBMutableCharacteristic(
+            type = CBUUID.UUIDWithString(entry.writeToUUID),
+            properties = CBCharacteristicPropertyWrite or CBCharacteristicPropertyWriteWithoutResponse,
+            value = null,
+            permissions = CBAttributePermissionsWriteable
+        )
+
+        val service = CBMutableService(CBUUID.UUIDWithString(entry.discoveryServiceUUID), primary = true)
+        service.setCharacteristics(listOf(readChar, writeChar))
+
+        peripheralManager?.addService(service)
+        NSLog("BleManager: GATT service added")
+    }
 
     // ---- Central (scanner/client) delegate ----
 
@@ -41,7 +70,11 @@ actual class BleManager {
                 NSLog("BleManager: Central powered on")
                 if (scanWhenReady) {
                     scanWhenReady = false
-                    central.scanForPeripheralsWithServices(listOf(serviceUUID), null)
+                    var serviceList: MutableList<CBUUID> = mutableListOf()
+                    config.profiles.forEach { set ->
+                        serviceList.add(CBUUID.UUIDWithString(set.discoveryServiceUUID))
+                    }
+                    central.scanForPeripheralsWithServices(serviceList, null)
                     NSLog("BleManager: Deferred scan started")
                 }
             } else {
@@ -56,13 +89,34 @@ actual class BleManager {
             RSSI: NSNumber
         ) {
             val deviceId = didDiscoverPeripheral.identifier.UUIDString
-            val deviceName = didDiscoverPeripheral.name ?: "Unknown Device"
+            if( discoveredPeripherals[deviceId] == null) {
+                val deviceName = didDiscoverPeripheral.name ?: "Unknown Device"
 
-            // Cache peripheral (must keep strong reference for connection)
-            discoveredPeripherals[deviceId] = didDiscoverPeripheral
+                var service: ServiceEntry? = null
+                // Extract advertised services from the advertisement data map
+                val serviceUuids =
+                    advertisementData[CBAdvertisementDataServiceUUIDsKey] as? List<CBUUID> ?: return
+                serviceUuids.forEach { id ->
+                    NSLog("discovered device service UUID= ${id.UUIDString}")
+                }
 
-            NSLog("BleManager: Discovered $deviceName ($deviceId)")
-            deviceDiscoveredCallback?.invoke(deviceId, deviceName)
+                // Match advertised service UUIDs against our profiles. CBUUID equality normalizes
+                // 16-bit (e.g. FFF0) vs full 128-bit base UUIDs, so no string slicing is needed.
+                config.profiles.forEach { set ->
+                    val target = CBUUID.UUIDWithString(set.discoveryServiceUUID)
+                    if (serviceUuids.any { it == target }) {
+                        NSLog("BleManager: found set=${set.discoveryServiceUUID}")
+                        service = set
+                    }
+                }
+
+                // Cache peripheral (must keep strong reference for connection)
+                // need to relate the service (and characteristics) found in response to ble scan services
+                discoveredPeripherals[deviceId] = accessoryDevice(didDiscoverPeripheral, service)
+
+                NSLog("BleManager: Discovered $deviceName ($deviceId)")
+                deviceDiscoveredCallback?.invoke(deviceId, deviceName)
+            }
         }
 
         override fun centralManager(
@@ -70,9 +124,15 @@ actual class BleManager {
             didConnectPeripheral: CBPeripheral
         ) {
             val deviceId = didConnectPeripheral.identifier.UUIDString
+            val device = discoveredPeripherals[deviceId]
             NSLog("BleManager: Connected to $deviceId, discovering services")
             didConnectPeripheral.delegate = peripheralClientDelegate
-            didConnectPeripheral.discoverServices(listOf(serviceUUID))
+            val services: MutableList<CBUUID> = mutableListOf()
+            NSLog("BleManager: discovering services from")
+            NSLog( discoveredPeripherals[deviceId]?.service?.discoveryServiceUUID?:"")
+            services.add(CBUUID.UUIDWithString((discoveredPeripherals[deviceId]?.service?.discoveryServiceUUID?:"").uppercase()))
+
+            didConnectPeripheral.discoverServices(null) //services)
         }
 
         // Note: didFailToConnect and didDisconnect omitted to avoid ObjC selector conflicts
@@ -88,9 +148,11 @@ actual class BleManager {
                 centralManager?.cancelPeripheralConnection(peripheral)
                 return
             }
-
-            val service = peripheral.services?.firstOrNull {
-                (it as? CBService)?.UUID == serviceUUID
+            val discoveredDevice = discoveredPeripherals[peripheral.identifier.UUIDString]
+            NSLog("BleManager: device service =${peripheral.services} and service on scan discover was ${discoveredDevice?.service?.discoveryServiceUUID}")
+            val targetServiceUuid = discoveredDevice?.service?.discoveryServiceUUID?.let { CBUUID.UUIDWithString(it) }
+            val service = if (targetServiceUuid == null) null else peripheral.services?.firstOrNull {
+                (it as? CBService)?.UUID == targetServiceUuid
             } as? CBService
 
             if (service == null) {
@@ -98,8 +160,12 @@ actual class BleManager {
                 centralManager?.cancelPeripheralConnection(peripheral)
                 return
             }
-
-            peripheral.discoverCharacteristics(listOf(configReadUUID, configWriteUUID), service)
+            NSLog(("discovering characteristics"))
+            peripheral.discoverCharacteristics( null, //listOf(
+                   // discoveredDevice?.service?.readFromUUID?.let {theString -> CBUUID.UUIDWithString(theString)},
+                   // discoveredDevice?.service?.writeToUUID?.let { theString -> CBUUID.UUIDWithString(theString)}
+            //),
+             service)
         }
 
         override fun peripheral(
@@ -112,11 +178,26 @@ actual class BleManager {
                 centralManager?.cancelPeripheralConnection(peripheral)
                 return
             }
-
+            val discovererDevice = discoveredPeripherals[peripheral.identifier.UUIDString]
             // Step 1: Read the peer's config
-            val readChar = didDiscoverCharacteristicsForService.characteristics?.firstOrNull {
-                (it as? CBCharacteristic)?.UUID == configReadUUID
-            } as? CBCharacteristic
+            var readChar:  CBCharacteristic? = null
+
+            didDiscoverCharacteristicsForService.characteristics?.forEach { c ->
+                NSLog("discovered char="+c.toString())
+                (c as? CBCharacteristic)?.let { char ->
+                    if (char.UUID == discovererDevice?.service?.readFromUUID?.let {
+                            CBUUID.UUIDWithString(
+                                it.uppercase()
+                            )
+                        }
+                        ){
+                        if(readChar==null)
+                            readChar = char as CBCharacteristic?
+                    }
+
+                    NSLog("characteristic found = ${c.UUID.UUIDString}")
+                }
+            }
 
             if (readChar != null) {
                 peripheral.readValueForCharacteristic(readChar)
@@ -126,20 +207,22 @@ actual class BleManager {
             }
         }
 
-
+        // in response to notify
         override fun peripheral(
             peripheral: CBPeripheral,
             didUpdateValueForCharacteristic: CBCharacteristic,
             error: NSError?
         ) {
             if (error != null) {
-                NSLog("BleManager: Characteristic update error: ${error.localizedDescription}")
+                NSLog("BleManager: Characteristic update error: ${error.localizedDescription} ${didUpdateValueForCharacteristic.UUID}")
                 centralManager?.cancelPeripheralConnection(peripheral)
                 return
             }
+            val peerId = peripheral.identifier.UUIDString
+            val discovererDevice = discoveredPeripherals[peerId]
+            NSLog("update characteristic = ${didUpdateValueForCharacteristic.UUID}")
+            if (didUpdateValueForCharacteristic.UUID == discovererDevice?.service?.readFromUUID?.let { CBUUID.UUIDWithString(it) }){
 
-            if (didUpdateValueForCharacteristic.UUID == configReadUUID) {
-                val peerId = peripheral.identifier.UUIDString
                 val data = didUpdateValueForCharacteristic.value
                 if (data != null) {
                     val remoteConfig = UwbSessionConfig.fromByteArray(data.toByteArray())
@@ -156,11 +239,11 @@ actual class BleManager {
                 val localCfg = pendingConfigs[peerId]
                 if (localCfg != null) {
                     val service = peripheral.services?.firstOrNull {
-                        (it as? CBService)?.UUID == serviceUUID
+                        (it as? CBService)?.UUID == discovererDevice.service.discoveryServiceUUID?.let { CBUUID.UUIDWithString(it) }
                     } as? CBService
 
                     val writeChar = service?.characteristics?.firstOrNull {
-                        (it as? CBCharacteristic)?.UUID == configWriteUUID
+                        (it as? CBCharacteristic)?.UUID == discovererDevice.service.writeToUUID?.let { CBUUID.UUIDWithString(it) }
                     } as? CBCharacteristic
 
                     if (writeChar != null) {
@@ -182,9 +265,16 @@ actual class BleManager {
 
     private val peripheralManagerDelegate = object : NSObject(), CBPeripheralManagerDelegateProtocol {
 
+
         override fun peripheralManagerDidUpdateState(peripheral: CBPeripheralManager) {
             if (peripheral.state == CBManagerStatePoweredOn) {
                 NSLog("BleManager: Peripheral manager powered on")
+                // GATT services can only be added once powered on, else CoreBluetooth rejects them
+                // with "API MISUSE … powered on state" and the peer reads invalid handles.
+                if (gattServerWhenReady) {
+                    gattServerWhenReady = false
+                    addAllGattServices()
+                }
                 if (advertiseWhenReady) {
                     advertiseWhenReady = false
                     startAdvertisingInternal()
@@ -214,6 +304,13 @@ actual class BleManager {
                 NSLog("BleManager: Failed to add service: ${error.localizedDescription}")
             } else {
                 NSLog("BleManager: GATT service added")
+                // addService is async — chain the next profile only after this one is added.
+                config.profiles.forEachIndexed { index, service ->
+                    if( didAddService.UUID == CBUUID.UUIDWithString(service.discoveryServiceUUID) ){
+                        if(index < config.profiles.lastIndex)
+                            addGattService(index+1 )
+                    }
+                }
             }
         }
 
@@ -221,7 +318,12 @@ actual class BleManager {
             peripheral: CBPeripheralManager,
             didReceiveReadRequest: CBATTRequest
         ) {
-            if (didReceiveReadRequest.characteristic.UUID == configReadUUID) {
+            // The connecting central isn't in discoveredPeripherals (that map is filled by scanning),
+            // so match the characteristic against any hosted profile's read char.
+            val isReadChar = config.profiles.any {
+                didReceiveReadRequest.characteristic.UUID == CBUUID.UUIDWithString(it.readFromUUID)
+            }
+            if (isReadChar) {
                 val configBytes = localConfig?.toByteArray() ?: ByteArray(0)
                 val offset = didReceiveReadRequest.offset.toInt()
                 if (offset < configBytes.size) {
@@ -242,8 +344,14 @@ actual class BleManager {
             peripheral: CBPeripheralManager,
             didReceiveWriteRequests: List<*>
         ) {
+
             didReceiveWriteRequests.forEach { request ->
-                if (request is CBATTRequest && request.characteristic.UUID == configWriteUUID) {
+
+                if (request is CBATTRequest) {
+                  val isWriteChar = config.profiles.any {
+                      request.characteristic.UUID == CBUUID.UUIDWithString(it.writeToUUID)
+                  }
+                  if( isWriteChar ) {
                     val data = request.value
                     if (data != null) {
                         val remoteConfig = UwbSessionConfig.fromByteArray(data.toByteArray())
@@ -257,11 +365,14 @@ actual class BleManager {
                     }
                     peripheral.respondToRequest(request, CBATTErrorSuccess)
                 }
+                }
             }
         }
+
     }
 
     // ---- Public API: Scanning ----
+
 
     actual fun startScanning() {
         val central = centralManager ?: CBCentralManager(centralDelegate, null).also {
@@ -269,7 +380,14 @@ actual class BleManager {
         }
 
         if (central.state == CBManagerStatePoweredOn) {
-            central.scanForPeripheralsWithServices(listOf(serviceUUID), null)
+            val services: MutableList<CBUUID> = mutableListOf()
+            config.profiles.forEach { set ->
+                services.add(CBUUID.UUIDWithString(set.discoveryServiceUUID))
+            }
+            val options = mapOf<Any?, Any?>(
+                CBCentralManagerScanOptionAllowDuplicatesKey to NSNumber(false)
+            )
+            central.scanForPeripheralsWithServices(services, options)
             NSLog("BleManager: Scan started immediately")
         } else {
             scanWhenReady = true
@@ -281,7 +399,7 @@ actual class BleManager {
         centralManager?.stopScan()
         NSLog("BleManager: Scan stopped")
     }
-
+ 
     actual fun advertise() {
         if (peripheralManager == null) {
             peripheralManager = CBPeripheralManager(peripheralManagerDelegate, null)
@@ -296,8 +414,11 @@ actual class BleManager {
     }
 
     private fun startAdvertisingInternal() {
+        val services: MutableList<CBUUID> = mutableListOf()
+        val uidstring = config.profiles.find { it.name == config.advertiseProfile }?.discoveryServiceUUID ?: ""
+        services.add(CBUUID.UUIDWithString(uidstring))
         val advertisementData = mapOf<Any?, Any?>(
-            CBAdvertisementDataServiceUUIDsKey to listOf(serviceUUID),
+            CBAdvertisementDataServiceUUIDsKey to services,
             CBAdvertisementDataLocalNameKey to "UWB Device"
         )
         peripheralManager?.startAdvertising(advertisementData)
@@ -327,27 +448,19 @@ actual class BleManager {
             peripheralManager = CBPeripheralManager(peripheralManagerDelegate, null)
         }
 
-        // Build the GATT service
-        val readChar = CBMutableCharacteristic(
-            type = configReadUUID,
-            properties = CBCharacteristicPropertyRead,
-            value = null, // Dynamic value — served via delegate
-            permissions = CBAttributePermissionsReadable
-        )
-        readCharacteristic = readChar
+        if (peripheralManager?.state == CBManagerStatePoweredOn) {
+            addAllGattServices()
+        } else {
+            gattServerWhenReady = true
+            NSLog("BleManager: GATT server deferred until powered on")
+        }
+    }
 
-        val writeChar = CBMutableCharacteristic(
-            type = configWriteUUID,
-            properties = CBCharacteristicPropertyWrite or CBCharacteristicPropertyWriteWithoutResponse,
-            value = null,
-            permissions = CBAttributePermissionsWriteable
-        )
-
-        val service = CBMutableService(serviceUUID, primary = true)
-        service.setCharacteristics(listOf(readChar, writeChar))
-
-        peripheralManager?.addService(service)
-        NSLog("BleManager: GATT server started")
+    /** Adds the first profile's service; the rest are chained via the didAddService delegate. */
+    private fun addAllGattServices() {
+        if (config.profiles.isNotEmpty()) {
+            addGattService(0)
+        }
     }
 
     actual fun stopGattServer() {
@@ -360,14 +473,15 @@ actual class BleManager {
     // ---- Public API: GATT Client (config exchange) ----
 
     actual fun connectAndExchangeConfig(peerId: String, localConfig: UwbSessionConfig) {
-        val peripheral = discoveredPeripherals[peerId]
+        NSLog("BleManager: in connect and config")
+        val peripheral = discoveredPeripherals[peerId]?.bleDevice
         if (peripheral == null) {
             NSLog("BleManager: No cached peripheral for $peerId")
             return
         }
 
         pendingConfigs[peerId] = localConfig
-
+        NSLog("BleManager: starting connect")
         centralManager?.connectPeripheral(peripheral, null)
         NSLog("BleManager: Connecting to $peerId for config exchange")
     }
@@ -385,3 +499,4 @@ actual class BleManager {
         NSLog("BleManager: Cleanup completed")
     }
 }
+

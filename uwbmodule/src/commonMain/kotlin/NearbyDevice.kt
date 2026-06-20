@@ -33,5 +33,5 @@ data class NearbyDevice(
     val state: DeviceState = DeviceState.Discovered,
     val errorMessage: String? = null,
     val sessionId: Int? = null,
-    val channel: Int? = null
+    val channel: Int? = null,
 )

@@ -5,7 +5,7 @@ actual class ManagerFactory {
         return MultiplatformUwbManager()
     }
 
-    actual fun createBleManager(): BleManager {
-        return BleManager()
+    actual fun createBleManager(config: BleDiscoveryConfig): BleManager {
+        return BleManager(config)
     }
 }
