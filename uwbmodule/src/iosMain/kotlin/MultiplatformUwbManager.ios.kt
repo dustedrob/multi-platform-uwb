@@ -46,7 +46,10 @@ actual class MultiplatformUwbManager {
     /** Strong reference to delegate to prevent GC. */
     private var sessionDelegate: SessionDelegate? = null
 
-    actual suspend fun initialize() {
+    /*actual suspend fun initialize(){
+
+    }*/
+     actual suspend fun initialize() {
         if (!NISession.isSupported()) {
             errorCallback?.invoke("NearbyInteraction not supported on this device")
             return
