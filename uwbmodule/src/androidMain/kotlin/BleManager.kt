@@ -30,8 +30,10 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import java.util.UUID
 
-var GattName = "us"
-actual class BleManager(private val context: Context) {
+actual class BleManager(
+    private val context: Context,
+    private val config: BleDiscoveryConfig = BleDiscoveryConfig(),
+) {
     private val TAG = "BleManager"
 
     private data class  accessoryDevice (
@@ -71,7 +73,7 @@ actual class BleManager(private val context: Context) {
             }
             if(discoveredDevices[deviceAddress] == null) {
                 result.scanRecord?.serviceUuids?.forEach { uuid ->
-                    GattUuids.forEach { serviceEntry ->
+                    config.profiles.forEach { serviceEntry ->
                         if (serviceEntry.discoveryServiceUUID.uppercase() == uuid.toString()
                                 .uppercase()
                         )
@@ -127,11 +129,11 @@ actual class BleManager(private val context: Context) {
         override fun onServiceAdded(status: Int, service: BluetoothGattService?) {
             super.onServiceAdded(status, service)
             Log.d(TAG,"Service Added ${service?.uuid.toString()}, status=${status}")
-            // find the one just added
-            GattUuids.forEachIndexed { index, entry ->
+            // addService() is async — chain the next profile's service only after this one is added.
+            config.profiles.forEachIndexed { index, entry ->
                 if( service?.uuid.toString().equals(entry.discoveryServiceUUID, ignoreCase = true)   ){
                     // if we aren't on the last
-                    if(index <GattUuids.lastIndex)
+                    if(index < config.profiles.lastIndex)
                         // add the next one
                         addGattService(index+1 )
                 }
@@ -146,8 +148,12 @@ actual class BleManager(private val context: Context) {
             offset: Int,
             characteristic: BluetoothGattCharacteristic
         ) {
-            var discoveredDevice= discoveredDevices[device.address]
-            if (characteristic.uuid.toString() == discoveredDevice?.service?.readFromUUID?.uppercase()) {
+            // The connecting central isn't in discoveredDevices (that map is filled by scanning, not
+            // the server role), so match the characteristic against any hosted profile's read char.
+            val isReadChar = config.profiles.any {
+                it.readFromUUID.equals(characteristic.uuid.toString(), ignoreCase = true)
+            }
+            if (isReadChar) {
                 val configBytes = localConfig?.toByteArray() ?: ByteArray(0)
                 val responseBytes = if (offset < configBytes.size) {
                     configBytes.copyOfRange(offset, configBytes.size)
@@ -171,8 +177,10 @@ actual class BleManager(private val context: Context) {
             offset: Int,
             value: ByteArray?
         ) {
-            var discoveredDevice= discoveredDevices[device.address]
-            if (characteristic.uuid.toString() == discoveredDevice?.service?.writeToUUID?.uppercase() && value != null) {
+            val isWriteChar = config.profiles.any {
+                it.writeToUUID.equals(characteristic.uuid.toString(), ignoreCase = true)
+            }
+            if (isWriteChar && value != null) {
                 gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
 
                 val remoteConfig = UwbSessionConfig.fromByteArray(value)
@@ -236,11 +244,11 @@ actual class BleManager(private val context: Context) {
             }
 
             val scanSettings = ScanSettings.Builder()
-                .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY or ScanSettings.CALLBACK_TYPE_FIRST_MATCH)
+                .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
                 .build()
 
             var filters: MutableList<ScanFilter> = mutableListOf()
-            GattUuids.forEach { serviceEntry ->
+            config.profiles.forEach { serviceEntry ->
                 val scanFilter = ScanFilter.Builder()
                     .setServiceUuid(ParcelUuid(UUID.fromString(serviceEntry.discoveryServiceUUID.uppercase())))
                     .build()
@@ -298,7 +306,7 @@ actual class BleManager(private val context: Context) {
             // which Android compresses to 2 bytes.
             val data = AdvertiseData.Builder()
                 .setIncludeDeviceName(false)
-                .addServiceUuid(ParcelUuid((UUID.fromString(GattUuids.find { it.name == GattName }?.discoveryServiceUUID?.uppercase()))))
+                .addServiceUuid(ParcelUuid((UUID.fromString(config.profiles.find { it.name == config.advertiseProfile }?.discoveryServiceUUID?.uppercase()))))
                 .build()
 
             val scanResponse = AdvertiseData.Builder()
@@ -370,25 +378,25 @@ actual class BleManager(private val context: Context) {
     @RequiresPermission(BLUETOOTH_CONNECT)
     fun addGattService(index:Int){
 
-            // Build the UWB config service
+            // Build the UWB config service. All profiles are PRIMARY so each is independently
+            // discoverable by a connecting client.
             val service = BluetoothGattService(
-                UUID.fromString(GattUuids[index].discoveryServiceUUID.uppercase()),
-                //if(index==0)
+                UUID.fromString(config.profiles[index].discoveryServiceUUID.uppercase()),
                 BluetoothGattService.SERVICE_TYPE_PRIMARY
-                //else BluetoothGattService.SERVICE_TYPE_SECONDARY
             )
 
-            // Readable characteristic: our local config
+            // Readable characteristic: our local config. (Read-only for now; the accessory-protocol
+            // tx-notify flow would also need a CCCD descriptor + notifyCharacteristicChanged — future work.)
             val readChar = BluetoothGattCharacteristic(
-                UUID.fromString(GattUuids[index].readFromUUID.uppercase()),
-                BluetoothGattCharacteristic.PROPERTY_READ or BluetoothGattCharacteristic.PROPERTY_NOTIFY,
+                UUID.fromString(config.profiles[index].readFromUUID.uppercase()),
+                BluetoothGattCharacteristic.PROPERTY_READ,
                 BluetoothGattCharacteristic.PERMISSION_READ
             )
             service.addCharacteristic(readChar)
 
             // Writable characteristic: peer writes their config here
             val writeChar = BluetoothGattCharacteristic(
-                UUID.fromString(GattUuids[index].writeToUUID.uppercase()),
+                UUID.fromString(config.profiles[index].writeToUUID.uppercase()),
                 BluetoothGattCharacteristic.PROPERTY_WRITE,
                 BluetoothGattCharacteristic.PERMISSION_WRITE
             )
@@ -465,7 +473,7 @@ actual class BleManager(private val context: Context) {
                         return
                     }
                     val service = gatt.getService(UUID.fromString(serviceEntry?.discoveryServiceUUID?.uppercase()))
-                    if (characteristic.uuid == service.getCharacteristic(UUID.fromString(serviceEntry?.readFromUUID?.uppercase()))) {
+                    if (characteristic.uuid == UUID.fromString(serviceEntry?.readFromUUID?.uppercase())) {
                         val remoteConfigBytes = characteristic.value
                         val remoteConfig = remoteConfigBytes?.let { UwbSessionConfig.fromByteArray(it) }
 
@@ -477,7 +485,7 @@ actual class BleManager(private val context: Context) {
                         }
 
                         // Step 2: Write our config to peer
-                        val writeChar = service?.getCharacteristic(UUID.fromString(serviceEntry?.writeToUUID))
+                        val writeChar = service?.getCharacteristic(UUID.fromString(serviceEntry?.writeToUUID?.uppercase()))
                         if (writeChar != null) {
                             writeChar.value = localConfig.toByteArray()
                             gatt.writeCharacteristic(writeChar)
