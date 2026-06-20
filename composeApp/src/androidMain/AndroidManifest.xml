@@ -10,11 +10,10 @@
         android:usesPermissionFlags="neverForLocation" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-    
+
     <!-- UWB permission -->
     <uses-permission android:name="android.permission.UWB_RANGING" />
-    
-    <!-- Location permission (required for Bluetooth scanning) -->
+
     <!-- Location is only required for BLE scanning on Android 11 (API 30) and below;
          on Android 12+ the neverForLocation flag above removes this requirement. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"

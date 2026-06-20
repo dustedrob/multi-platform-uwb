@@ -271,7 +271,7 @@ actual class BleManager(private val context: Context) {
             // which Android compresses to 2 bytes.
             val data = AdvertiseData.Builder()
                 .setIncludeDeviceName(false)
-                .addServiceUuid(ParcelUuid(UUID.fromString(GattUuids.find{ it.name == GattName}?.discoveryServiceUUID?.uppercase())))
+                .addServiceUuid(ParcelUuid(SERVICE_UUID))
                 .build()
 
             val scanResponse = AdvertiseData.Builder()
