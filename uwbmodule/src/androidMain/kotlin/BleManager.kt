@@ -105,6 +105,7 @@ actual class BleManager(private val context: Context) {
     // ---- GATT Server callback ----
 
     private val gattServerCallback = object : BluetoothGattServerCallback() {
+
         override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 Log.d(TAG, "GATT server: device connected: ${device.address}")
@@ -271,7 +272,7 @@ actual class BleManager(private val context: Context) {
             // which Android compresses to 2 bytes.
             val data = AdvertiseData.Builder()
                 .setIncludeDeviceName(false)
-                .addServiceUuid(ParcelUuid(SERVICE_UUID))
+                .addServiceUuid(ParcelUuid((UUID.fromString(GattUuids.find { it.name == GattName }?.discoveryServiceUUID?.uppercase()))))
                 .build()
 
             val scanResponse = AdvertiseData.Builder()
