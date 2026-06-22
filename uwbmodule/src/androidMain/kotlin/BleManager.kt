@@ -131,7 +131,9 @@ actual class BleManager(
             Log.d(TAG,"Service Added ${service?.uuid.toString()}, status=${status}")
             // addService() is async — chain the next profile's service only after this one is added.
             config.profiles.forEachIndexed { index, entry ->
-                if( service?.uuid.toString().equals(entry.discoveryServiceUUID, ignoreCase = true)   ){
+                if( service?.uuid.toString().equals(entry.discoveryServiceUUID, ignoreCase = true) ||
+                    service?.uuid.toString().equals(entry.discoveryServiceUUID.slice(ItnRage(4,7)), ignoreCase = true)
+                    ){
                     // if we aren't on the last
                     if(index < config.profiles.lastIndex)
                         // add the next one
@@ -151,7 +153,8 @@ actual class BleManager(
             // The connecting central isn't in discoveredDevices (that map is filled by scanning, not
             // the server role), so match the characteristic against any hosted profile's read char.
             val isReadChar = config.profiles.any {
-                it.readFromUUID.equals(characteristic.uuid.toString(), ignoreCase = true)
+                it.readFromUUID.equals(characteristic.uuid.toString(), ignoreCase = true) ||
+                it.readFromUUID.slice(IntRange(4,7)).equals(characteristic.uuid.toString(), ignoreCase = true)
             }
             if (isReadChar) {
                 val configBytes = localConfig?.toByteArray() ?: ByteArray(0)
@@ -179,6 +182,7 @@ actual class BleManager(
         ) {
             val isWriteChar = config.profiles.any {
                 it.writeToUUID.equals(characteristic.uuid.toString(), ignoreCase = true)
+                it.writeToUUID.slice(IntRange(4,7)).equals(characteristic.uuid.toString(), ignoreCase = true)
             }
             if (isWriteChar && value != null) {
                 gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
