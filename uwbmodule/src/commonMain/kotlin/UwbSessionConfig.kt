@@ -17,6 +17,13 @@ data class UwbSessionConfig(
     val uwbAddress: ByteArray,
     /** Serialized NI discovery token (iOS) or null (Android). */
     val discoveryToken: ByteArray? = null,
+    /**
+     * 8-byte static-STS session key (Android) or null (iOS).
+     *
+     * Required by androidx.core.uwb for `CONFIG_UNICAST_DS_TWR`; both peers must
+     * use the same key. Exchanged here so the two ends can agree on one.
+     */
+    val sessionKey: ByteArray? = null,
 ) {
     /**
      * Serialize to a simple binary format for BLE GATT exchange.
@@ -26,11 +33,14 @@ data class UwbSessionConfig(
      * [1B version][4B sessionId][4B channel][4B preambleIndex]
      * [2B uwbAddr.size][uwbAddr bytes]
      * [2B token.size][token bytes]   // size=0 if null
+     * [2B key.size][key bytes]       // optional trailer; absent or size=0 if null
      * ```
+     * The session-key trailer is optional so older payloads (without it) still parse.
      */
     fun toByteArray(): ByteArray {
         val tokenBytes = discoveryToken ?: ByteArray(0)
-        val size = 1 + 4 + 4 + 4 + 2 + uwbAddress.size + 2 + tokenBytes.size
+        val keyBytes = sessionKey ?: ByteArray(0)
+        val size = 1 + 4 + 4 + 4 + 2 + uwbAddress.size + 2 + tokenBytes.size + 2 + keyBytes.size
         val buf = ByteArray(size)
         var pos = 0
 
@@ -65,6 +75,12 @@ data class UwbSessionConfig(
         buf[pos++] = (tokenBytes.size shr 8).toByte()
         buf[pos++] = tokenBytes.size.toByte()
         tokenBytes.copyInto(buf, pos)
+        pos += tokenBytes.size
+
+        // sessionKey
+        buf[pos++] = (keyBytes.size shr 8).toByte()
+        buf[pos++] = keyBytes.size.toByte()
+        keyBytes.copyInto(buf, pos)
 
         return buf
     }
@@ -74,11 +90,14 @@ data class UwbSessionConfig(
         if (other !is UwbSessionConfig) return false
         val thisToken = discoveryToken ?: ByteArray(0)
         val otherToken = other.discoveryToken ?: ByteArray(0)
+        val thisKey = sessionKey ?: ByteArray(0)
+        val otherKey = other.sessionKey ?: ByteArray(0)
         return sessionId == other.sessionId &&
                 channel == other.channel &&
                 preambleIndex == other.preambleIndex &&
                 uwbAddress.contentEquals(other.uwbAddress) &&
-                thisToken.contentEquals(otherToken)
+                thisToken.contentEquals(otherToken) &&
+                thisKey.contentEquals(otherKey)
     }
 
     override fun hashCode(): Int {
@@ -87,6 +106,7 @@ data class UwbSessionConfig(
         result = 31 * result + preambleIndex
         result = 31 * result + uwbAddress.contentHashCode()
         result = 31 * result + (discoveryToken?.contentHashCode() ?: 0)
+        result = 31 * result + (sessionKey?.contentHashCode() ?: 0)
         return result
     }
 
@@ -113,6 +133,15 @@ data class UwbSessionConfig(
             val tokenLen = readShort(bytes, pos); pos += 2
             if (pos + tokenLen > bytes.size) return null
             val discoveryToken = if (tokenLen > 0) bytes.copyOfRange(pos, pos + tokenLen) else null
+            pos += tokenLen
+
+            // Optional session-key trailer (absent in older payloads).
+            val sessionKey = if (pos + 2 <= bytes.size) {
+                val keyLen = readShort(bytes, pos); pos += 2
+                if (keyLen > 0 && pos + keyLen <= bytes.size) bytes.copyOfRange(pos, pos + keyLen) else null
+            } else {
+                null
+            }
 
             return UwbSessionConfig(
                 sessionId = sessionId,
@@ -120,6 +149,7 @@ data class UwbSessionConfig(
                 preambleIndex = preambleIndex,
                 uwbAddress = uwbAddress,
                 discoveryToken = discoveryToken,
+                sessionKey = sessionKey,
             )
         }
 

@@ -15,6 +15,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
+import java.security.SecureRandom
 
 actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? = null) {
     private val TAG = "UwbManager"
@@ -29,10 +30,17 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
     /** Active ranging coroutine jobs, keyed by peer ID. Cancel to stop ranging. */
     private val activeJobs = mutableMapOf<String, Job>()
 
+    /**
+     * Our 8-byte static-STS session key, generated once and reused for the lifetime
+     * of this manager so the value advertised over BLE matches the one used at ranging.
+     */
+    private var localSessionKey: ByteArray? = null
+
     /** Default channel and preamble — used when generating local config. */
     private companion object {
         const val DEFAULT_CHANNEL = 9
         const val DEFAULT_PREAMBLE_INDEX = 10
+        const val SESSION_KEY_SIZE = 8
     }
 
     actual suspend fun initialize() {
@@ -63,12 +71,19 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
         // (the peer with the lexicographically smaller address initiates).
         val sessionId = localAddress.fold(0) { acc, b -> acc * 31 + (b.toInt() and 0xFF) }
 
+        // Generate the static-STS key lazily and cache it, so the key we send over
+        // BLE is the same one we compare/use when ranging starts.
+        val key = localSessionKey ?: ByteArray(SESSION_KEY_SIZE)
+            .also { SecureRandom().nextBytes(it) }
+            .also { localSessionKey = it }
+
         return UwbSessionConfig(
             sessionId = sessionId,
             channel = DEFAULT_CHANNEL,
             preambleIndex = DEFAULT_PREAMBLE_INDEX,
             uwbAddress = localAddress,
             discoveryToken = null,
+            sessionKey = key,
         )
     }
 
@@ -88,24 +103,39 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
                 val peerAddress = UwbAddress(remoteConfig.uwbAddress)
                 val peerDevice = UwbDevice(peerAddress)
 
-                // Deterministic session ID: use the smaller of the two proposed IDs
-                // so both peers agree without extra negotiation.
+                // Deterministic agreement without a handshake: the peer with the
+                // lexicographically smaller UWB address is the initiator, and both
+                // peers adopt its full parameter set (session ID, channel, preamble,
+                // and static-STS key). Both ends hold both configs after the BLE
+                // exchange, so they independently compute the same values.
                 val localConfig = getLocalConfig()
-                val agreedSessionId = if (localConfig != null) {
-                    minOf(localConfig.sessionId, remoteConfig.sessionId)
+                val agreed = if (localConfig != null &&
+                    compareAddresses(localConfig.uwbAddress, remoteConfig.uwbAddress) <= 0
+                ) {
+                    localConfig
                 } else {
-                    remoteConfig.sessionId
+                    remoteConfig
+                }
+
+                val sessionKey = agreed.sessionKey
+                if (sessionKey == null || sessionKey.size != SESSION_KEY_SIZE) {
+                    errorCallback?.invoke(
+                        "Cannot range with $peerId: missing or invalid session key " +
+                                "(static STS requires $SESSION_KEY_SIZE bytes)"
+                    )
+                    activeJobs.remove(peerId)
+                    return@launch
                 }
 
                 val rangingParameters = RangingParameters(
                     uwbConfigType = RangingParameters.CONFIG_UNICAST_DS_TWR,
-                    sessionId = agreedSessionId,
+                    sessionId = agreed.sessionId,
                     subSessionId = 0,
-                    sessionKeyInfo = null,
+                    sessionKeyInfo = sessionKey,
                     subSessionKeyInfo = null,
                     complexChannel = UwbComplexChannel(
-                        channel = remoteConfig.channel,
-                        preambleIndex = remoteConfig.preambleIndex
+                        channel = agreed.channel,
+                        preambleIndex = agreed.preambleIndex
                     ),
                     peerDevices = listOf(peerDevice),
                     updateRateType = RangingParameters.RANGING_UPDATE_RATE_AUTOMATIC
@@ -113,7 +143,7 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
 
                 Log.d(
                     TAG,
-                    "Starting ranging with $peerId — session=$agreedSessionId ch=${remoteConfig.channel}"
+                    "Starting ranging with $peerId — session=${agreed.sessionId} ch=${agreed.channel}"
                 )
 
                 scope.prepareSession(rangingParameters)
@@ -161,6 +191,19 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
 
     actual fun setErrorCallback(callback: (error: String) -> Unit) {
         errorCallback = callback
+    }
+
+    /**
+     * Compare two UWB addresses lexicographically (unsigned, byte by byte).
+     * Returns a negative value if [a] sorts before [b], positive if after, 0 if equal.
+     */
+    private fun compareAddresses(a: ByteArray, b: ByteArray): Int {
+        val len = minOf(a.size, b.size)
+        for (i in 0 until len) {
+            val diff = (a[i].toInt() and 0xFF) - (b[i].toInt() and 0xFF)
+            if (diff != 0) return diff
+        }
+        return a.size - b.size
     }
 
     /** Stop all sessions and clean up resources. */
