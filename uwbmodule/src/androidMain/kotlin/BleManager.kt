@@ -132,7 +132,7 @@ actual class BleManager(
             // addService() is async — chain the next profile's service only after this one is added.
             config.profiles.forEachIndexed { index, entry ->
                 if( service?.uuid.toString().equals(entry.discoveryServiceUUID, ignoreCase = true) ||
-                    service?.uuid.toString().equals(entry.discoveryServiceUUID.slice(ItnRage(4,7)), ignoreCase = true)
+                    service?.uuid.toString().equals(entry.discoveryServiceUUID.slice(IntRange(4,7)), ignoreCase = true)
                     ){
                     // if we aren't on the last
                     if(index < config.profiles.lastIndex)
