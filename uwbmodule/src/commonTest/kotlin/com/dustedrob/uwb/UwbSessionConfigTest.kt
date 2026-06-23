@@ -99,4 +99,64 @@ class UwbSessionConfigTest {
         assertEquals(a, b)
         assertEquals(a.hashCode(), b.hashCode())
     }
+
+    @Test
+    fun roundtripWithSessionKey() {
+        val key = byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8)
+        val config = UwbSessionConfig(
+            sessionId = 4382,
+            channel = 9,
+            preambleIndex = 10,
+            uwbAddress = byteArrayOf(0x86.toByte(), 0xE4.toByte()),
+            discoveryToken = null,
+            sessionKey = key,
+        )
+        val bytes = config.toByteArray()
+        val restored = UwbSessionConfig.fromByteArray(bytes)
+        assertNotNull(restored)
+        assertNotNull(restored.sessionKey)
+        assertTrue(key.contentEquals(restored.sessionKey!!))
+        assertEquals(config, restored)
+    }
+
+    @Test
+    fun roundtripWithBothTokenAndKey() {
+        val token = byteArrayOf(0xAA.toByte(), 0xBB.toByte())
+        val key = ByteArray(8) { it.toByte() }
+        val config = UwbSessionConfig(7, 9, 10, byteArrayOf(0x01), token, key)
+        val restored = UwbSessionConfig.fromByteArray(config.toByteArray())
+        assertNotNull(restored)
+        assertTrue(token.contentEquals(restored.discoveryToken!!))
+        assertTrue(key.contentEquals(restored.sessionKey!!))
+    }
+
+    @Test
+    fun sessionKeyNullWhenAbsent() {
+        val config = UwbSessionConfig(1, 2, 3, byteArrayOf(9), discoveryToken = byteArrayOf(1, 2))
+        val restored = UwbSessionConfig.fromByteArray(config.toByteArray())
+        assertNotNull(restored)
+        assertNull(restored.sessionKey)
+    }
+
+    @Test
+    fun parsesLegacyPayloadWithoutKeyTrailer() {
+        // A payload from before the session-key trailer existed: it ends right after
+        // the discovery-token block, with no [2B key.size] trailer at all.
+        val sid = 42
+        val ch = 9
+        val pre = 10
+        val addr = byteArrayOf(0x01, 0x02)
+        val legacy = byteArrayOf(
+            1, // version
+            (sid shr 24).toByte(), (sid shr 16).toByte(), (sid shr 8).toByte(), sid.toByte(),
+            (ch shr 24).toByte(), (ch shr 16).toByte(), (ch shr 8).toByte(), ch.toByte(),
+            (pre shr 24).toByte(), (pre shr 16).toByte(), (pre shr 8).toByte(), pre.toByte(),
+            (addr.size shr 8).toByte(), addr.size.toByte(), addr[0], addr[1],
+            0, 0, // token size = 0
+        )
+        val restored = UwbSessionConfig.fromByteArray(legacy)
+        assertNotNull(restored)
+        assertEquals(sid, restored.sessionId)
+        assertNull(restored.sessionKey)
+    }
 }
