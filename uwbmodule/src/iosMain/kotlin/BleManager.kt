@@ -103,9 +103,8 @@ actual class BleManager(
                 // Match advertised service UUIDs against our profiles. CBUUID equality normalizes
                 // 16-bit (e.g. FFF0) vs full 128-bit base UUIDs, so no string slicing is needed.
                 config.profiles.forEach { set ->
-                    //val target = CBUUID.UUIDWithString(set.discoveryServiceUUID)
-                    if (serviceUuids.any { it.UUIDString() == set.discoveryServiceUUID  || it.UUIDString() == set.discoveryServiceUUID.slice(IntRange(4,7))  }) {
-                        NSLog("BleManager: found set=${set.discoveryServiceUUID}")
+                    val target = CBUUID.UUIDWithString(set.discoveryServiceUUID)
+                    if (serviceUuids.any { it == target }) {
                         service = set
                     }
                 }

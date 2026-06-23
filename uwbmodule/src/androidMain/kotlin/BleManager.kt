@@ -181,7 +181,7 @@ actual class BleManager(
             value: ByteArray?
         ) {
             val isWriteChar = config.profiles.any {
-                it.writeToUUID.equals(characteristic.uuid.toString(), ignoreCase = true)
+                it.writeToUUID.equals(characteristic.uuid.toString(), ignoreCase = true) ||
                 it.writeToUUID.slice(IntRange(4,7)).equals(characteristic.uuid.toString(), ignoreCase = true)
             }
             if (isWriteChar && value != null) {
