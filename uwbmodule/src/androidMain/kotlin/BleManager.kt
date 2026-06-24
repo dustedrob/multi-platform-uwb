@@ -73,11 +73,12 @@ actual class BleManager(
             }
             if(discoveredDevices[deviceAddress] == null) {
                 result.scanRecord?.serviceUuids?.forEach { uuid ->
+                    Log.d(TAG, "scan discovered id=${uuid}")
                     config.profiles.forEach { serviceEntry ->
-                        if (serviceEntry.discoveryServiceUUID.uppercase() == uuid.toString()
-                                .uppercase()
+                        if (serviceEntry.advertisedUUID?.equals(uuid.toString(), true) == true
                         )
                             if (service == null) {
+                                Log.d(TAG, "found matching service entry = ${serviceEntry.advertisedUUID}")
                                 service = serviceEntry
                             }
                     }
@@ -131,13 +132,19 @@ actual class BleManager(
             Log.d(TAG,"Service Added ${service?.uuid.toString()}, status=${status}")
             // addService() is async — chain the next profile's service only after this one is added.
             config.profiles.forEachIndexed { index, entry ->
-                if( service?.uuid.toString().equals(entry.discoveryServiceUUID, ignoreCase = true) ||
-                    service?.uuid.toString().equals(entry.discoveryServiceUUID.slice(IntRange(4,7)), ignoreCase = true)
-                    ){
-                    // if we aren't on the last
-                    if(index < config.profiles.lastIndex)
+                if(service?.uuid.toString() == entry.advertisedUUID) {
+                    if (service?.uuid.toString()
+                            .equals(entry.discoveryServiceUUID, ignoreCase = true) ||
+                        service?.uuid.toString().equals(
+                            entry.discoveryServiceUUID.slice(IntRange(4, 7)),
+                            ignoreCase = true
+                        )
+                    ) {
+                        // if we aren't on the last
+                        if (index < config.profiles.size - 1)
                         // add the next one
-                        addGattService(index+1 )
+                            addGattService(config.profiles[index + 1])
+                    }
                 }
             }
 
@@ -186,7 +193,7 @@ actual class BleManager(
             }
             if (isWriteChar && value != null) {
                 gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
-
+                Log.d(TAG, "read config bytes=${value.size}")
                 val remoteConfig = UwbSessionConfig.fromByteArray(value)
                 if (remoteConfig != null) {
                     Log.d(TAG, "GATT server: received config from ${device.address}")
@@ -253,8 +260,9 @@ actual class BleManager(
 
             var filters: MutableList<ScanFilter> = mutableListOf()
             config.profiles.forEach { serviceEntry ->
+                Log.d(TAG,"adding scan for id=${serviceEntry.advertisedUUID}")
                 val scanFilter = ScanFilter.Builder()
-                    .setServiceUuid(ParcelUuid(UUID.fromString(serviceEntry.discoveryServiceUUID.uppercase())))
+                    .setServiceUuid(ParcelUuid(UUID.fromString(serviceEntry.advertisedUUID?.uppercase())))
                     .build()
                 filters.add(scanFilter)
             }
@@ -355,11 +363,14 @@ actual class BleManager(
             Log.e(TAG, "Missing BLUETOOTH_CONNECT permission for GATT server")
             return
         }
-
+        config.profiles.forEach { set ->
+            if(set.advertisedUUID == null)
+                set.advertisedUUID = set.discoveryServiceUUID
+        }
         try {
             val server= bluetoothManager.openGattServer(context, gattServerCallback)
             gattServer = server
-            addGattService(0)
+            addGattService( config.profiles[0])
             Log.d(TAG, "GATT server started")
         } catch (e: Exception) {
             Log.e(TAG, "Error starting GATT server: ${e.message}")
@@ -380,19 +391,19 @@ actual class BleManager(
 
     // ---- Public API: GATT Client (config exchange) ----
     @RequiresPermission(BLUETOOTH_CONNECT)
-    fun addGattService(index:Int){
+    fun addGattService(entry:ServiceEntry){
 
             // Build the UWB config service. All profiles are PRIMARY so each is independently
             // discoverable by a connecting client.
             val service = BluetoothGattService(
-                UUID.fromString(config.profiles[index].discoveryServiceUUID.uppercase()),
+                UUID.fromString(entry.discoveryServiceUUID.uppercase()),
                 BluetoothGattService.SERVICE_TYPE_PRIMARY
             )
 
             // Readable characteristic: our local config. (Read-only for now; the accessory-protocol
             // tx-notify flow would also need a CCCD descriptor + notifyCharacteristicChanged — future work.)
             val readChar = BluetoothGattCharacteristic(
-                UUID.fromString(config.profiles[index].readFromUUID.uppercase()),
+                UUID.fromString(entry.readFromUUID.uppercase()),
                 BluetoothGattCharacteristic.PROPERTY_READ,
                 BluetoothGattCharacteristic.PERMISSION_READ
             )
@@ -400,7 +411,7 @@ actual class BleManager(
 
             // Writable characteristic: peer writes their config here
             val writeChar = BluetoothGattCharacteristic(
-                UUID.fromString(config.profiles[index].writeToUUID.uppercase()),
+                UUID.fromString(entry.writeToUUID.uppercase()),
                 BluetoothGattCharacteristic.PROPERTY_WRITE,
                 BluetoothGattCharacteristic.PERMISSION_WRITE
             )
@@ -421,10 +432,11 @@ actual class BleManager(
             Log.e(TAG, "Missing BLUETOOTH_CONNECT permission for GATT client")
             return
         }
-        val serviceEntry: ServiceEntry? = discoveredDevices[peerId]?.service ?: null
+        val serviceEntry: ServiceEntry? = discoveredDevices[peerId]?.service
 
         try {
             device.connectGatt(context, false, object : BluetoothGattCallback() {
+
                 @RequiresPermission(BLUETOOTH_CONNECT)
                 override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
                     if (newState == BluetoothProfile.STATE_CONNECTED) {
@@ -443,11 +455,9 @@ actual class BleManager(
                         gatt.close()
                         return
                     }
-                    gatt.services.forEach { service ->
-                        Log.d(TAG, "service name found = ${service.uuid.toString()}")
-                    }
 
                     val service = gatt.getService(UUID.fromString(serviceEntry?.discoveryServiceUUID?.uppercase()))
+                    Log.d(TAG, "service found = ${service.uuid}")
                     if (service == null) {
                         Log.e(TAG, "GATT client: UWB config service not found on $peerId")
                         gatt.close()
@@ -479,6 +489,7 @@ actual class BleManager(
                     val service = gatt.getService(UUID.fromString(serviceEntry?.discoveryServiceUUID?.uppercase()))
                     if (characteristic.uuid == UUID.fromString(serviceEntry?.readFromUUID?.uppercase())) {
                         val remoteConfigBytes = characteristic.value
+                        Log.d(TAG, "read config size=${remoteConfigBytes.size}")
                         val remoteConfig = remoteConfigBytes?.let { UwbSessionConfig.fromByteArray(it) }
 
                         if (remoteConfig != null) {

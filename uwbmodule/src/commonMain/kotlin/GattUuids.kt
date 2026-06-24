@@ -25,6 +25,7 @@ data class ServiceEntry(
     val readFromUUID: String,
     /** Characteristic the client writes its own config to (the peer's "rx"). */
     val writeToUUID: String,
+    var advertisedUUID: String? = null
 )
 
 /** This project's own (vendor-neutral) GATT service for UWB config exchange. */
@@ -37,7 +38,7 @@ const val UWB_CONFIG_CHAR_UUID = "0000FFF1-0000-1000-8000-00805F9B34FB"
 const val UWB_CONFIG_WRITE_CHAR_UUID = "0000FFF2-0000-1000-8000-00805F9B34FB"
 
 /** The library's own profile — the default identity a device advertises and exchanges config over. */
-val LOCAL_PROFILE = ServiceEntry(
+var LOCAL_PROFILE = ServiceEntry(
     name = "local",
     discoveryServiceUUID = UWB_CONFIG_SERVICE_UUID,
     readFromUUID = UWB_CONFIG_CHAR_UUID,
@@ -67,8 +68,16 @@ val NORDIC_NEARBY_PROFILE = ServiceEntry(
     writeToUUID = "6E400002-B5A3-F393-E0A9-E50E24DCCA9E",
 )
 
+val CNBeacon = ServiceEntry (
+    name="CN_Beacon",
+    discoveryServiceUUID = "2E938FD0-6A61-11ED-A1EB-0242AC120002",
+    readFromUUID = "2E93941C-6A61-11ED-A1EB-0242AC120002",
+    writeToUUID = "2E93998A-6A61-11ED-A1EB-0242AC120002",
+    "11000000-27b9-42f0-82aa-2e951747bbf9"
+)
+
 /** Vendor-free default: only the library's own [LOCAL_PROFILE]. Apps add vendor profiles explicitly. */
-val DEFAULT_PROFILES = listOf(LOCAL_PROFILE)
+val DEFAULT_PROFILES = listOf(LOCAL_PROFILE, QORVO_NEARBY_PROFILE, NORDIC_NEARBY_PROFILE, CNBeacon)
 
 /**
  * App-owned configuration for BLE discovery and config exchange.
