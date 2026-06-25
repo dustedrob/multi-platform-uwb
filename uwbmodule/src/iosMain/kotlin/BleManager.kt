@@ -10,6 +10,13 @@ actual class BleManager(
     private val config: BleDiscoveryConfig = BleDiscoveryConfig(),
 ) {
 
+    private var InitCommand : ByteArray = byteArrayOf(  0x0A )
+    private var ConfigAndStartCommand : ByteArray = byteArrayOf(  0x0B )
+    private var StopCommand : ByteArray = byteArrayOf(  0x0C )
+
+    private var accessoryConfigurationData : Byte= 0x1
+    private var accessoryUwbDidStart : Byte = 0x2
+    private var accessoryUwbDidStop : Byte = 0x3
     private var centralManager: CBCentralManager? = null
     private var peripheralManager: CBPeripheralManager? = null
 
@@ -35,6 +42,37 @@ actual class BleManager(
     private var advertiseWhenReady = false
     private var gattServerWhenReady = false
 
+    fun enableNotifications(peripheral: CBPeripheral, characteristic: CBCharacteristic) {
+        // Step 1: Tell iOS/CoreBluetooth to turn on notifications for this characteristic
+        peripheral.setNotifyValue(enabled = true, forCharacteristic = characteristic)
+    }
+
+    private fun processConfig(peripheral: CBPeripheral, accessory: accessoryDevice?, data: ByteArray, peerId:String){
+        if (data != null) {
+            val remoteConfig = UwbSessionConfig.fromByteArray(data)
+
+            if (remoteConfig != null) {
+                NSLog("BleManager: Received config from $peerId")
+                configExchangedCallback?.invoke(peerId, remoteConfig)
+            } else {
+                NSLog("BleManager: Failed to parse config from $peerId")
+            }
+            pendingConfigs.remove(peerId)
+        }
+
+        // Step 2: Write our config to the peer (using WriteWithoutResponse to avoid needing didWriteValue callback)
+        val localCfg = pendingConfigs[peerId]
+        if (localCfg != null) {
+
+            val writeChar = accessory?.service?.writeToUUID?.let { CBUUID.UUIDWithString(it ) as CBCharacteristic }
+
+            if (writeChar != null) {
+                val configData = localCfg.toByteArray().toNSData()
+                peripheral.writeValue(configData, writeChar, CBCharacteristicWriteWithoutResponse)
+                NSLog("BleManager: Wrote config to ${peripheral.hash.toString()}")
+            }
+        }
+    }
     fun addGattService(entry: ServiceEntry){
         NSLog("BleManager: addGATTService on entry $entry")
         //val entry = config.profiles[index]
@@ -42,7 +80,7 @@ actual class BleManager(
         // Read-only for now; accessory-protocol tx-notify is future work (would add CBCharacteristicPropertyNotify).
         val readChar = CBMutableCharacteristic(
             type = CBUUID.UUIDWithString(entry.readFromUUID),
-            properties = CBCharacteristicPropertyRead,
+            properties = CBCharacteristicPropertyRead or CBCharacteristicPropertyNotify,
             value = null, // Dynamic value — served via delegate
             permissions = CBAttributePermissionsReadable
         )
@@ -187,9 +225,12 @@ actual class BleManager(
             val discovererDevice = discoveredPeripherals[peripheral.hash.toString()]
             // Step 1: Read the peer's config
             var readChar:  CBCharacteristic? = null
+            var writeChar:  CBCharacteristic? = null
 
-            didDiscoverCharacteristicsForService.characteristics?.forEach { c ->
+            didDiscoverCharacteristicsForService.characteristics?.forEachIndexed { index, c ->
+
                 NSLog("discovered char="+c.toString())
+
                 (c as? CBCharacteristic)?.let { char ->
                     if (char.UUID == discovererDevice?.service?.readFromUUID?.let {
                             CBUUID.UUIDWithString(
@@ -200,16 +241,35 @@ actual class BleManager(
                         if(readChar==null)
                             readChar = char as CBCharacteristic?
                     }
-
+                    if (char.UUID == discovererDevice?.service?.writeToUUID?.let {
+                            CBUUID.UUIDWithString(
+                                it.uppercase()
+                            )
+                        }
+                    ){
+                        if(writeChar==null)
+                            writeChar = char as CBCharacteristic?
+                    }
+                    if(char.isNotifying || index==2){
+                        NSLog("BleManager: setting notifications for characteristic ${char.UUID}")
+                        enableNotifications(peripheral,char)
+                    }
                     NSLog("characteristic found = ${c.UUID.UUIDString}")
                 }
             }
 
-            if (readChar != null) {
-                peripheral.readValueForCharacteristic(readChar)
-            } else {
-                NSLog("BleManager: Read characteristic not found")
-                centralManager?.cancelPeripheralConnection(peripheral)
+            if(writeChar != null){
+                NSLog("BleManager: write Init ")
+                val configData = InitCommand.toNSData()
+                peripheral.writeValue(configData, writeChar, CBCharacteristicWriteWithoutResponse)
+            }
+            if(false) {
+                if (readChar != null) {
+                    peripheral.readValueForCharacteristic(readChar)
+                } else {
+                    NSLog("BleManager: Read characteristic not found")
+                    centralManager?.cancelPeripheralConnection(peripheral)
+                }
             }
         }
 
@@ -229,39 +289,29 @@ actual class BleManager(
             NSLog("update characteristic = ${didUpdateValueForCharacteristic.UUID}")
             if (didUpdateValueForCharacteristic.UUID == discovererDevice?.service?.readFromUUID?.let { CBUUID.UUIDWithString(it) }){
 
-                val data = didUpdateValueForCharacteristic.value
-                if (data != null) {
-                    val remoteConfig = UwbSessionConfig.fromByteArray(data.toByteArray())
-
-                    if (remoteConfig != null) {
-                        NSLog("BleManager: Received config from $peerId")
-                        configExchangedCallback?.invoke(peerId, remoteConfig)
-                    } else {
-                        NSLog("BleManager: Failed to parse config from $peerId")
-                    }
+                processConfig( peripheral, discovererDevice,
+                    didUpdateValueForCharacteristic.value?.toByteArray() ?: byteArrayOf(), peerId)
+                if(false) {
+                    // Exchange complete, disconnect
+                    centralManager?.cancelPeripheralConnection(peripheral)
                 }
 
-                // Step 2: Write our config to the peer (using WriteWithoutResponse to avoid needing didWriteValue callback)
-                val localCfg = pendingConfigs[peerId]
-                if (localCfg != null) {
-                    val service = peripheral.services?.firstOrNull {
-                        (it as? CBService)?.UUID == discovererDevice.service.discoveryServiceUUID?.let { CBUUID.UUIDWithString(it) }
-                    } as? CBService
+            } else
+                if (didUpdateValueForCharacteristic.UUID.UUIDString.contains("af2",true)){
+                    NSLog("BleManager: notify on characteristic  ${didUpdateValueForCharacteristic.UUID.UUIDString} value = ${didUpdateValueForCharacteristic.value}")
+                    val responseByte = didUpdateValueForCharacteristic.value?.toByteArray()[0]
+                        when (responseByte) {
+                            accessoryConfigurationData -> {NSLog("BleManage: Accessory sent config")
+                                // call for incoming config data
+                                processConfig( peripheral, discovererDevice, didUpdateValueForCharacteristic.value!!.toByteArray().let { it.copyOfRange(1, it.size) }, peerId)
+                            }
+                            accessoryUwbDidStart -> NSLog("BleManage: Accessory sent didStart confirmation ")
+                            accessoryUwbDidStop ->NSLog("BleManage: Accessory sent didStop confirmation ")
+                            else -> NSLog("BleManage: Accessory sent unexpected response $responseByte")
+                        }
 
-                    val writeChar = service?.characteristics?.firstOrNull {
-                        (it as? CBCharacteristic)?.UUID == discovererDevice.service.writeToUUID?.let { CBUUID.UUIDWithString(it) }
-                    } as? CBCharacteristic
-
-                    if (writeChar != null) {
-                        val configData = localCfg.toByteArray().toNSData()
-                        peripheral.writeValue(configData, writeChar, CBCharacteristicWriteWithoutResponse)
-                        NSLog("BleManager: Wrote config to ${peripheral.hash.toString()}")
-                    }
                 }
-                // Exchange complete, disconnect
-                centralManager?.cancelPeripheralConnection(peripheral)
-                pendingConfigs.remove(peerId)
-            }
+
         }
         // Note: didWriteValueForCharacteristic omitted to avoid ObjC selector conflict
         // Using WriteWithoutResponse instead

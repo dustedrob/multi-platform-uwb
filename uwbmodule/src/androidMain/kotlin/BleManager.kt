@@ -8,11 +8,13 @@ import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
+import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothGattServer
 import android.bluetooth.BluetoothGattServerCallback
 import android.bluetooth.BluetoothGattService
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
+import android.bluetooth.BluetoothStatusCodes
 import android.bluetooth.le.AdvertiseCallback
 import android.bluetooth.le.AdvertiseData
 import android.bluetooth.le.AdvertiseSettings
@@ -36,6 +38,13 @@ actual class BleManager(
 ) {
     private val TAG = "BleManager"
 
+    private var InitCommand : ByteArray = byteArrayOf(  0x0A )
+    private var ConfigAndStartCommand : ByteArray = byteArrayOf(  0x0B )
+    private var StopCommand : ByteArray = byteArrayOf(  0x0C )
+
+    private var accessoryConfigurationData : Byte= 0x1
+    private var accessoryUwbDidStart : Byte = 0x2
+    private var accessoryUwbDidStop : Byte = 0x3
     private data class  accessoryDevice (
         val bleDevice: BluetoothDevice? = null,
         val service: ServiceEntry?=null
@@ -112,12 +121,6 @@ actual class BleManager(
 
     private val gattServerCallback = object : BluetoothGattServerCallback() {
 
-       /* @RequiresPermission(BLUETOOTH_CONNECT)
-        fun onServiceAdded(status: Int, characteristic: BluetoothGattCharacteristic){
-            Log.d(TAG, "GATT server: service added")
-            addGattService(status+1)
-        }*/
-
         override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 Log.d(TAG, "GATT server: device connected: ${device.address}")
@@ -170,8 +173,21 @@ actual class BleManager(
                 } else {
                     ByteArray(0)
                 }
-                gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, responseBytes)
-                Log.d(TAG, "GATT server: sent config to ${device.address} (${configBytes.size} bytes)")
+                // if the characteristic is not no response
+                if(characteristic.writeType != BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE ) {
+                    // send one
+                    gattServer?.sendResponse(
+                        device,
+                        requestId,
+                        BluetoothGatt.GATT_SUCCESS,
+                        offset,
+                        responseBytes
+                    )
+                    Log.d(
+                        TAG,
+                        "GATT server: sent config to ${device.address} (${configBytes.size} bytes)"
+                    )
+                }
             } else {
                 gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_FAILURE, 0, null)
             }
@@ -437,6 +453,24 @@ actual class BleManager(
         try {
             device.connectGatt(context, false, object : BluetoothGattCallback() {
 
+
+                override fun onCharacteristicChanged(
+                    gatt: BluetoothGatt,
+                    characteristic: BluetoothGattCharacteristic,
+                    value: ByteArray
+                ) {
+                    super.onCharacteristicChanged(gatt, characteristic, value)
+                    Log.d(TAG, "characteristic changed ${characteristic.uuid}" )
+                    when (val responseByte:Byte = value[0]) {
+                        accessoryConfigurationData -> {Log.d(TAG,"Accessory sent config")
+                                                        // call for incoming config data
+                        }
+                        accessoryUwbDidStart -> Log.d(TAG,"Accessory sent didStart confirmation ")
+                        accessoryUwbDidStop -> Log.d(TAG,"Accessory sent didStop confirmation ")
+                        else -> Log.d(TAG,"Accessory sent unexpected response $responseByte")
+                    }
+                }
+
                 @RequiresPermission(BLUETOOTH_CONNECT)
                 override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
                     if (newState == BluetoothProfile.STATE_CONNECTED) {
@@ -455,23 +489,48 @@ actual class BleManager(
                         gatt.close()
                         return
                     }
-
                     val service = gatt.getService(UUID.fromString(serviceEntry?.discoveryServiceUUID?.uppercase()))
                     Log.d(TAG, "service found = ${service.uuid}")
+                    service.characteristics.forEachIndexed { index,  ch ->
+                        Log.d(TAG, "characteristic discovered in OnServiceDiscovered ${ch.uuid.toString()} wt=${ch.writeType} ")
+                        if(ch.properties.and(BluetoothGattCharacteristic.PROPERTY_NOTIFY) == BluetoothGattCharacteristic.PROPERTY_NOTIFY || index==2) {
+                            gatt.setCharacteristicNotification(ch, true)
+                            Log.d(TAG,"Found characteristic with notify set  = ${ch.uuid} ${ch.properties}")
+                        }
+                    }
+
+
                     if (service == null) {
                         Log.e(TAG, "GATT client: UWB config service not found on $peerId")
                         gatt.close()
                         return
                     }
 
-                    // Step 1: Read peer's config
-                    val readChar = service.getCharacteristic(UUID.fromString(serviceEntry?.readFromUUID?.uppercase()))
-                    if (readChar != null) {
-                        gatt.readCharacteristic(readChar)
+                    val writeChar = service.getCharacteristic(UUID.fromString(serviceEntry?.writeToUUID?.uppercase()))
+                    if (writeChar != null) {
+                        Log.d(TAG, "Wrote init command to device")
+                        writeChar.value = InitCommand
+                        val rc=gatt.writeCharacteristic(writeChar) //,InitCommand,BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
+                        if(!rc) {
+                            Log.d(TAG, "write init failed ")
+                        }
+
                     } else {
-                        Log.e(TAG, "GATT client: read characteristic not found on $peerId")
+                        Log.e(TAG, "GATT client: write characteristic failed $peerId")
                         gatt.close()
                     }
+                    if(false) {
+                        // Step 1: Read peer's config
+                        val readChar =
+                            service.getCharacteristic(UUID.fromString(serviceEntry?.readFromUUID?.uppercase()))
+                        if (readChar != null) {
+                            gatt.readCharacteristic(readChar)
+                        } else {
+                            Log.e(TAG, "GATT client: read characteristic not found on $peerId")
+                            gatt.close()
+                        }
+                    }
+
                 }
 
                 @RequiresPermission(BLUETOOTH_CONNECT)
@@ -523,7 +582,7 @@ actual class BleManager(
                         Log.e(TAG, "GATT client: write failed for $peerId, status=$status")
                     }
                     // Exchange complete, disconnect
-                    gatt.disconnect()
+                    //gatt.disconnect()
                 }
             })
         } catch (e: Exception) {
