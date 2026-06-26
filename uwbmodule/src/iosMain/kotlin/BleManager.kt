@@ -25,6 +25,8 @@ actual class BleManager(
 
     // GATT server state
     private var localConfig: UwbSessionConfig? = null
+    private var Android :Int =1;
+    private var iOS = 2;
     private var readCharacteristic: CBMutableCharacteristic? = null
 
     // Track discovered peripherals for GATT client connections
@@ -47,7 +49,7 @@ actual class BleManager(
         peripheral.setNotifyValue(enabled = true, forCharacteristic = characteristic)
     }
 
-    private fun processConfig(peripheral: CBPeripheral, accessory: accessoryDevice?, data: ByteArray, peerId:String){
+    private fun processConfig(source:Int,peripheral: CBPeripheral, accessory: accessoryDevice?, data: ByteArray, peerId:String){
         if (data != null) {
             val remoteConfig = UwbSessionConfig.fromByteArray(data)
 
@@ -254,7 +256,7 @@ actual class BleManager(
                         NSLog("BleManager: setting notifications for characteristic ${char.UUID}")
                         enableNotifications(peripheral,char)
                     }
-                    NSLog("characteristic found = ${c.UUID.UUIDString}")
+                    //NSLog("characteristic found = ${c.UUID.UUIDString}")
                 }
             }
 
@@ -289,7 +291,7 @@ actual class BleManager(
             NSLog("update characteristic = ${didUpdateValueForCharacteristic.UUID}")
             if (didUpdateValueForCharacteristic.UUID == discovererDevice?.service?.readFromUUID?.let { CBUUID.UUIDWithString(it) }){
 
-                processConfig( peripheral, discovererDevice,
+                processConfig( Android,peripheral, discovererDevice,
                     didUpdateValueForCharacteristic.value?.toByteArray() ?: byteArrayOf(), peerId)
                 if(false) {
                     // Exchange complete, disconnect
@@ -303,7 +305,7 @@ actual class BleManager(
                         when (responseByte) {
                             accessoryConfigurationData -> {NSLog("BleManage: Accessory sent config")
                                 // call for incoming config data
-                                processConfig( peripheral, discovererDevice, didUpdateValueForCharacteristic.value!!.toByteArray().let { it.copyOfRange(1, it.size) }, peerId)
+                                processConfig( iOS,peripheral, discovererDevice, didUpdateValueForCharacteristic.value!!.toByteArray().let { it.copyOfRange(1, it.size) }, peerId)
                             }
                             accessoryUwbDidStart -> NSLog("BleManage: Accessory sent didStart confirmation ")
                             accessoryUwbDidStop ->NSLog("BleManage: Accessory sent didStop confirmation ")
