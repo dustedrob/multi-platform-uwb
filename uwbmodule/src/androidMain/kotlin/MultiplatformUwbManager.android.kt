@@ -17,7 +17,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 import java.security.SecureRandom
 
-actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? = null) {
+actual class MultiplatformUwbManager(private val UwbManager: UwbManager? = null) {
     private val TAG = "UwbManager"
 
     private var rangingCallback: ((String, Double, Double?, Double?) -> Unit)? = null
@@ -44,12 +44,12 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
     }
 
     actual suspend fun initialize() {
-        if (androidUwbManager == null) {
+        if (UwbManager == null) {
             errorCallback?.invoke("UWB not supported on this device")
             return
         }
         try {
-            val scope = androidUwbManager.controleeSessionScope()
+            val scope = UwbManager.controleeSessionScope()
             sessionScope = scope
 
             val capabilities = scope.rangingCapabilities

@@ -49,7 +49,7 @@ actual class BleManager(
         val bleDevice: BluetoothDevice? = null,
         val service: ServiceEntry?=null
     )
-
+    private var QueManager: BleQueueManager? = null
     private val bluetoothManager: BluetoothManager by lazy {
         context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
     }
@@ -66,6 +66,53 @@ actual class BleManager(
 
     // Track discovered peripherals for GATT client connections
     private val discoveredDevices = mutableMapOf<String, accessoryDevice>()
+
+    @RequiresPermission(BLUETOOTH_CONNECT)
+    private fun processConfigFromRemote(source: Sources, service: BluetoothGattService, data: ByteArray, peerId:String){
+
+        if(source == Sources.Unknown){
+            // we couldn't identify the source of the config from the incoming process
+            // could be an iPhone sending to an Android, or vice versa
+            // the UwbSession data will tell us ??? maybe!
+            Log.d(TAG, " unknown where this config data was sourced.. we are Android")
+        }
+            // if source == Android, this is ok
+            // if iOS we need to convert
+        val remoteConfig = UwbSessionConfig.fromByteArray(data)
+        val accessory = discoveredDevices[peerId]
+
+        if (remoteConfig != null) {
+            Log.d(TAG,"BleManager: Received config from $peerId")
+            configExchangedCallback?.invoke(peerId, remoteConfig)
+        } else {
+            Log.d(TAG,"BleManager: Failed to parse config from $peerId")
+        }
+
+        // Step 2: Write our config to the peer (using WriteWithoutResponse to avoid needing didWriteValue callback)
+        if(source == Sources.Android) {
+            if (localConfig != null) {
+
+                val writeChar =
+                    service.getCharacteristic(UUID.fromString(accessory?.service?.writeToUUID))
+
+                if (writeChar != null) {
+                    val configToSend = localConfig
+
+                    QueManager?.enqueue(
+                        BleCommand.WriteCharacteristic(
+                            writeChar,
+                            configToSend?.toByteArray() ?: byteArrayOf(),
+                            BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE
+                        )
+                    )
+                    Log.d(
+                        TAG,
+                        "BleManager: Wrote config to ${accessory?.bleDevice?.address.toString()}"
+                    )
+                }
+            }
+        }
+    }
 
     // ---- Scan callback ----
 
@@ -208,8 +255,10 @@ actual class BleManager(
                 it.writeToUUID.slice(IntRange(4,7)).equals(characteristic.uuid.toString(), ignoreCase = true)
             }
             if (isWriteChar && value != null) {
-                gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
+                //gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
                 Log.d(TAG, "read config bytes=${value.size}")
+                val peerId = device.address.toString()
+                processConfigFromRemote(Sources.Unknown, characteristic.service, value,peerId )
                 val remoteConfig = UwbSessionConfig.fromByteArray(value)
                 if (remoteConfig != null) {
                     Log.d(TAG, "GATT server: received config from ${device.address}")
@@ -454,6 +503,7 @@ actual class BleManager(
             device.connectGatt(context, false, object : BluetoothGattCallback() {
 
 
+                @RequiresPermission(BLUETOOTH_CONNECT)
                 override fun onCharacteristicChanged(
                     gatt: BluetoothGatt,
                     characteristic: BluetoothGattCharacteristic,
@@ -463,7 +513,11 @@ actual class BleManager(
                     Log.d(TAG, "characteristic changed ${characteristic.uuid}" )
                     when (val responseByte:Byte = value[0]) {
                         accessoryConfigurationData -> {Log.d(TAG,"Accessory sent config")
-                                                        // call for incoming config data
+                            // this is in response to notify, only Qorvo devices use notify protocol
+                            processConfigFromRemote(Sources.Qorvo, gatt.getService(UUID.fromString(serviceEntry?.discoveryServiceUUID)), value,
+                                peerId
+                            )
+
                         }
                         accessoryUwbDidStart -> Log.d(TAG,"Accessory sent didStart confirmation ")
                         accessoryUwbDidStop -> Log.d(TAG,"Accessory sent didStop confirmation ")
@@ -489,6 +543,7 @@ actual class BleManager(
                         gatt.close()
                         return
                     }
+                    QueManager= BleQueueManager(gatt)
                     val service = gatt.getService(UUID.fromString(serviceEntry?.discoveryServiceUUID?.uppercase()))
                     Log.d(TAG, "service found = ${service.uuid}")
                     service.characteristics.forEachIndexed { index,  ch ->
@@ -506,31 +561,40 @@ actual class BleManager(
                         return
                     }
 
-                    val writeChar = service.getCharacteristic(UUID.fromString(serviceEntry?.writeToUUID?.uppercase()))
-                    if (writeChar != null) {
-                        Log.d(TAG, "Wrote init command to device")
-                        writeChar.value = InitCommand
-                        val rc=gatt.writeCharacteristic(writeChar) //,InitCommand,BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
-                        if(!rc) {
-                            Log.d(TAG, "write init failed ")
+                    when(serviceEntry?.source) {
+                        Sources.Qorvo ->{
+                            val writeChar =
+                                service.getCharacteristic(UUID.fromString(serviceEntry?.writeToUUID?.uppercase()))
+                            if (writeChar != null) {
+                                Log.d(TAG, "Writing init command to device")
+                                writeChar.value = InitCommand
+                                QueManager?.enqueue(
+                                    BleCommand.WriteCharacteristic(
+                                        writeChar,
+                                        InitCommand,
+                                        BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+                                    )
+                                )
+                            } else {
+                                Log.e(TAG, "GATT client: write characteristic failed $peerId")
+                                gatt.close()
+                            }
                         }
-
-                    } else {
-                        Log.e(TAG, "GATT client: write characteristic failed $peerId")
-                        gatt.close()
-                    }
-                    if(false) {
-                        // Step 1: Read peer's config
-                        val readChar =
-                            service.getCharacteristic(UUID.fromString(serviceEntry?.readFromUUID?.uppercase()))
-                        if (readChar != null) {
-                            gatt.readCharacteristic(readChar)
-                        } else {
-                            Log.e(TAG, "GATT client: read characteristic not found on $peerId")
-                            gatt.close()
+                        Sources.Android ->{
+                            val readChar =
+                                service.getCharacteristic(UUID.fromString(serviceEntry.readFromUUID.uppercase()))
+                            if (readChar != null) {
+                                Log.d(TAG, "Reading Config from device")
+                                gatt.readCharacteristic(readChar)
+                            } else {
+                                Log.e(TAG, "GATT client: read characteristic not found on $peerId")
+                                gatt.close()
+                            }
+                        }
+                        else -> {
+                            Log.d(TAG,"Unexpected Source = $serviceEntry?.source")
                         }
                     }
-
                 }
 
                 @RequiresPermission(BLUETOOTH_CONNECT)
@@ -549,7 +613,11 @@ actual class BleManager(
                     if (characteristic.uuid == UUID.fromString(serviceEntry?.readFromUUID?.uppercase())) {
                         val remoteConfigBytes = characteristic.value
                         Log.d(TAG, "read config size=${remoteConfigBytes.size}")
-                        val remoteConfig = remoteConfigBytes?.let { UwbSessionConfig.fromByteArray(it) }
+
+                        // we received the config on a write, not notify.. Android protocol does that
+                        // but iOS device using the protocol could be providing the config
+                        processConfigFromRemote(Sources.Unknown,service, characteristic.value, gatt.device.address.toString())
+                        /*val remoteConfig = remoteConfigBytes?.let { UwbSessionConfig.fromByteArray(it) }
 
                         if (remoteConfig != null) {
                             Log.d(TAG, "GATT client: received config from $peerId")
@@ -565,7 +633,7 @@ actual class BleManager(
                             gatt.writeCharacteristic(writeChar)
                         } else {
                             gatt.close()
-                        }
+                        }*/
                     }
                 }
 
@@ -577,12 +645,20 @@ actual class BleManager(
                     status: Int
                 ) {
                     if (status == BluetoothGatt.GATT_SUCCESS) {
-                        Log.d(TAG, "GATT client: wrote config to $peerId")
+                        Log.d(TAG, "GATT client: wrote data to $peerId")
                     } else {
                         Log.e(TAG, "GATT client: write failed for $peerId, status=$status")
                     }
-                    // Exchange complete, disconnect
-                    //gatt.disconnect()
+
+                    for (serviceEntry in config.profiles) {
+                        if(characteristic.service.uuid.toString().equals(serviceEntry.discoveryServiceUUID,true &&
+                                    serviceEntry.source == Sources.Android)){
+                            // Exchange complete, disconnect
+                            gatt.disconnect()
+                            break;
+                        }
+                    }
+
                 }
             })
         } catch (e: Exception) {

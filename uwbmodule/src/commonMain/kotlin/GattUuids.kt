@@ -16,6 +16,12 @@ package com.dustedrob.uwb
  * The set of profiles and the locally advertised identity are supplied by the implementing app via
  * [BleDiscoveryConfig]; the library only ships vendor-free defaults.
  */
+enum class Sources {
+    Unknown,
+    Android,
+    Qorvo,
+    iOS
+}
 data class ServiceEntry(
     /** App-facing label used to select which profile this device advertises (see [BleDiscoveryConfig.advertiseProfile]). */
     val name: String,
@@ -25,7 +31,9 @@ data class ServiceEntry(
     val readFromUUID: String,
     /** Characteristic the client writes its own config to (the peer's "rx"). */
     val writeToUUID: String,
-    var advertisedUUID: String? = null
+    var advertisedUUID: String? = null,
+    // set the default source to Android
+    var source : Sources? = Sources.Android
 )
 
 /** This project's own (vendor-neutral) GATT service for UWB config exchange. */
@@ -53,8 +61,9 @@ var LOCAL_PROFILE = ServiceEntry(
 val QORVO_NEARBY_PROFILE = ServiceEntry(
     name = "QorvoNearbyFixed",
     discoveryServiceUUID = "2E938FD0-6A61-11ED-A1EB-0242AC120002",
-    readFromUUID = "2E939AF2-6A61-11ED-A1EB-0242AC120002",
+    readFromUUID = "2E93941C-6A61-11ED-A1EB-0242AC120002",
     writeToUUID = "2E93998A-6A61-11ED-A1EB-0242AC120002",
+    source = Sources.Qorvo
 )
 
 /**
@@ -66,6 +75,7 @@ val NORDIC_NEARBY_PROFILE = ServiceEntry(
     discoveryServiceUUID = "6E400001-B5A3-F393-E0A9-E50E24DCCA9E",
     readFromUUID = "6E400003-B5A3-F393-E0A9-E50E24DCCA9E",
     writeToUUID = "6E400002-B5A3-F393-E0A9-E50E24DCCA9E",
+    source = Sources.iOS
 )
 
 val CNBeacon = ServiceEntry (
@@ -73,7 +83,8 @@ val CNBeacon = ServiceEntry (
     discoveryServiceUUID = "2E938FD0-6A61-11ED-A1EB-0242AC120002",
     readFromUUID = "2E93941C-6A61-11ED-A1EB-0242AC120002",
     writeToUUID = "2E93998A-6A61-11ED-A1EB-0242AC120002",
-    "11000000-27b9-42f0-82aa-2e951747bbf9"
+    "31000000-27b9-42f0-82aa-2e951747bbf9",
+    source = Sources.Qorvo
 )
 
 /** Vendor-free default: only the library's own [LOCAL_PROFILE]. Apps add vendor profiles explicitly. */
