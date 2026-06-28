@@ -61,6 +61,14 @@ actual class BleManager(
     // Track discovered peripherals for GATT client connections
     private val discoveredDevices = mutableMapOf<String, AccessoryDevice>()
 
+    /** A live accessory connection kept open during ranging, for [sendToPeer] and the stop handshake. */
+    private class AccessoryConnection(
+        val gatt: BluetoothGatt,
+        val writeChar: BluetoothGattCharacteristic,
+        val queue: BleQueueManager,
+    )
+    private val accessoryConnections = mutableMapOf<String, AccessoryConnection>()
+
     /** Profiles we host on the local GATT server — only phone-to-phone (read/write) ones. */
     private fun serverProfiles(): List<UwbProfile> =
         config.profiles.filter { it.exchange == ExchangeProtocol.ReadWrite && it.readFromUuid != null }
@@ -74,6 +82,12 @@ actual class BleManager(
         } else {
             Log.e(TAG, "failed to parse config from $peerId")
         }
+    }
+
+    /** Deliver an accessory's raw configuration blob (opaque — wrapped, not parsed as our envelope). */
+    private fun deliverAccessoryConfig(peerId: String, raw: ByteArray) {
+        Log.d(TAG, "received accessory config from $peerId (${raw.size} bytes)")
+        configExchangedCallback?.invoke(peerId, UwbSessionConfig(0, 0, 0, ByteArray(0), accessoryData = raw))
     }
 
     // ---- Scan callback ----
@@ -482,6 +496,9 @@ actual class BleManager(
                                         BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
                                     )
                                 )
+                                // Keep the connection open for the rest of the accessory protocol
+                                // (configure-and-start, stop) — see sendToPeer.
+                                queue?.let { accessoryConnections[peerId] = AccessoryConnection(gatt, writeChar, it) }
                                 Log.d(TAG, "GATT client: sent accessory init to $peerId")
                             } else {
                                 Log.e(TAG, "GATT client: accessory characteristics not found on $peerId")
@@ -548,12 +565,17 @@ actual class BleManager(
                     if (value.isEmpty()) return
                     when (value[0]) {
                         NI_ACCESSORY_CONFIG_DATA -> {
+                            // Opaque accessory config — deliver raw; the UWB layer builds the session
+                            // and replies (via sendToPeer) with configure-and-start. Stay connected.
                             Log.d(TAG, "GATT client: accessory sent config")
-                            deliverRemoteConfig(peerId, value.copyOfRange(1, value.size))
-                            gatt.disconnect()
+                            deliverAccessoryConfig(peerId, value.copyOfRange(1, value.size))
                         }
                         NI_ACCESSORY_DID_START -> Log.d(TAG, "GATT client: accessory did start")
-                        NI_ACCESSORY_DID_STOP -> Log.d(TAG, "GATT client: accessory did stop")
+                        NI_ACCESSORY_DID_STOP -> {
+                            Log.d(TAG, "GATT client: accessory did stop")
+                            accessoryConnections.remove(peerId)
+                            gatt.disconnect()
+                        }
                         else -> Log.d(TAG, "GATT client: unexpected accessory response ${value[0]}")
                     }
                 }
@@ -590,11 +612,31 @@ actual class BleManager(
         }
     }
 
+    @RequiresPermission(BLUETOOTH_CONNECT)
+    actual fun sendToPeer(peerId: String, data: ByteArray) {
+        val conn = accessoryConnections[peerId]
+        if (conn == null) {
+            Log.d(TAG, "sendToPeer: no open accessory connection for $peerId")
+            return
+        }
+        conn.queue.enqueue(
+            BleCommand.WriteCharacteristic(
+                conn.writeChar, data,
+                BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+            )
+        )
+        Log.d(TAG, "sendToPeer: wrote ${data.size} bytes to $peerId")
+    }
+
     @RequiresPermission(BLUETOOTH_SCAN)
     actual fun cleanup() {
         stopScanning()
         stopAdvertising()
         stopGattServer()
+        if (hasConnectPermission()) {
+            accessoryConnections.values.forEach { it.gatt.disconnect() }
+        }
+        accessoryConnections.clear()
         discoveredDevices.clear()
         deviceDiscoveredCallback = null
         configExchangedCallback = null

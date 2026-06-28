@@ -158,5 +158,34 @@ class UwbSessionConfigTest {
         assertNotNull(restored)
         assertEquals(sid, restored.sessionId)
         assertNull(restored.sessionKey)
+        assertNull(restored.accessoryData)
+    }
+
+    @Test
+    fun roundtripWithAccessoryData() {
+        val acc = ByteArray(40) { (it * 7).toByte() }
+        val config = UwbSessionConfig(
+            sessionId = 0,
+            channel = 0,
+            preambleIndex = 0,
+            uwbAddress = ByteArray(0),
+            accessoryData = acc,
+        )
+        val restored = UwbSessionConfig.fromByteArray(config.toByteArray())
+        assertNotNull(restored)
+        assertNotNull(restored.accessoryData)
+        assertTrue(acc.contentEquals(restored.accessoryData!!))
+        assertNull(restored.discoveryToken)
+        assertNull(restored.sessionKey)
+        assertEquals(config, restored)
+    }
+
+    @Test
+    fun accessoryDataNullWhenAbsent() {
+        val config = UwbSessionConfig(1, 2, 3, byteArrayOf(9), sessionKey = byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
+        val restored = UwbSessionConfig.fromByteArray(config.toByteArray())
+        assertNotNull(restored)
+        assertNull(restored.accessoryData)
+        assertTrue(restored.sessionKey!!.size == 8)
     }
 }
