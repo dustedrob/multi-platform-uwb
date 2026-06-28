@@ -1,5 +1,7 @@
+import com.dustedrob.uwb.BleDiscoveryConfig
 import com.dustedrob.uwb.DeviceDiscoveryManager
 import com.dustedrob.uwb.DiscoveryEvent
+import com.dustedrob.uwb.LOCAL_PROFILE
 import com.dustedrob.uwb.ManagerFactory
 import com.dustedrob.uwb.NearbyDevice
 import com.dustedrob.uwb.UwbSessionConfig
@@ -27,7 +29,10 @@ class UwbDiscoveryViewModel(
 ) : ViewModel() {
     private val deviceDiscoveryManager = DeviceDiscoveryManager(
         managerFactory.createUwbManager(),
-        managerFactory.createBleManager()
+        // Phone-to-phone over LOCAL_PROFILE; also scan for the Qorvo accessory (app-owned profile).
+        managerFactory.createBleManager(
+            BleDiscoveryConfig(profiles = listOf(LOCAL_PROFILE, QorvoNearbyProfile))
+        )
     )
     var permissionState by mutableStateOf(PermissionState.NotDetermined)
         private set

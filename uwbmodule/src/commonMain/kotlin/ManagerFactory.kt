@@ -15,8 +15,8 @@ expect class ManagerFactory {
      * Create a platform-specific [BleManager] for BLE discovery and GATT exchange.
      *
      * @param config the profiles to scan/serve and the locally advertised identity. Defaults to the
-     *   library's vendor-free [BleDiscoveryConfig]; pass a custom one to add vendor profiles
-     *   (e.g. [QORVO_NEARBY_PROFILE]) or change which profile this device advertises.
+     *   library's vendor-free [BleDiscoveryConfig]; pass a custom one to add app-supplied [UwbProfile]s
+     *   (e.g. a vendor accessory) or change which profile this device advertises.
      */
     fun createBleManager(config: BleDiscoveryConfig = BleDiscoveryConfig()): BleManager
 }
