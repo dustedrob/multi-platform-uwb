@@ -127,6 +127,16 @@ actual class MultiplatformUwbManager {
                 errorCallback?.invoke("Failed to build accessory configuration for $peerId: ${e.message}")
                 return
             }
+            // check for camera assistance in later iOS systems
+            if(!NISession.deviceCapabilities.supportsDirectionMeasurement) {
+                NSLog("MultiPlatformMgr device does not support direction measurement");
+                if (NISession.deviceCapabilities.supportsCameraAssistance) {
+                    NSLog("MultiPlatformMgr device DOES support camera assistance")
+                    config.setCameraAssistanceEnabled(true)
+                } else {
+                    NSLog("MultiPlatformMgr device DOES NOT support camera assistance")
+                }
+            }
             accessoryPeerId = peerId
             NSLog("UwbManager: Starting accessory ranging with $peerId")
             session.runWithConfiguration(config)
