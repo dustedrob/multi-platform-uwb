@@ -274,7 +274,7 @@ class DeviceDiscoveryManager(
     }
 
     /** Called when UWB ranging data is received. */
-    internal suspend fun onRangingResult(peerId: String, distance: Double, azimuth: Double?, elevation: Double?) = mutex.withLock {
+    internal suspend fun onRangingResult(peerId: String, distance: Double, azimuth: Double?, elevation: Any?) = mutex.withLock {
         val existingDevices = _nearbyDevices.value.toMutableList()
         val deviceIndex = existingDevices.indexOfFirst { it.id == peerId }
 
