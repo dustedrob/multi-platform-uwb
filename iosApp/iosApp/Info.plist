@@ -53,5 +53,7 @@
 	<string>This app uses Bluetooth to advertise UWB capabilities to other devices</string>
 	<key>NSNearbyInteractionUsageDescription</key>
 	<string>This app uses Nearby Interaction to measure precise distance and direction to nearby UWB devices</string>
+	<key>NSCameraUsageDescription</key>
+	<string>This app uses the camera for Nearby Interaction camera assistance to measure the direction to nearby UWB devices</string>
 </dict>
 </plist>
