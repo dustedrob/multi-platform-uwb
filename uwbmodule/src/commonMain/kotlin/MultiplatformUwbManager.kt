@@ -36,6 +36,16 @@ expect class MultiplatformUwbManager {
     /** Register callback for ranging distance updates. */
     fun setRangingCallback(callback: (peerId: String, distance: Double, azimuth: Double?, elevation: Double?) -> Unit)
 
+    /**
+     * Register the outbound channel used to send data back to a peer over BLE.
+     *
+     * Needed for accessory ranging on iOS: `NINearbyAccessoryConfiguration` produces shareable
+     * configuration data *after* the session runs, which must be written to the accessory. The
+     * orchestrator wires this to [BleManager.sendToPeer]. Unused on Android (no data is generated
+     * post-run there).
+     */
+    fun setSendToPeerCallback(callback: (peerId: String, data: ByteArray) -> Unit)
+
     /** Register callback for errors. */
     fun setErrorCallback(callback: (error: String) -> Unit)
 

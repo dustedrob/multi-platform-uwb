@@ -24,6 +24,14 @@ data class UwbSessionConfig(
      * use the same key. Exchanged here so the two ends can agree on one.
      */
     val sessionKey: ByteArray? = null,
+    /**
+     * Opaque Apple/Qorvo Nearby-Interaction **Accessory Configuration Data** (iOS accessory) or null.
+     *
+     * Carries the raw bytes an accessory sends so the iOS NI manager can build a
+     * `NINearbyAccessoryConfiguration`. Mutually exclusive with [discoveryToken] (peer-to-peer): the
+     * BLE layer wraps the accessory's raw payload in this field locally — it is not our own envelope.
+     */
+    val accessoryData: ByteArray? = null,
 ) {
     /**
      * Serialize to a simple binary format for BLE GATT exchange.
@@ -34,13 +42,15 @@ data class UwbSessionConfig(
      * [2B uwbAddr.size][uwbAddr bytes]
      * [2B token.size][token bytes]   // size=0 if null
      * [2B key.size][key bytes]       // optional trailer; absent or size=0 if null
+     * [2B acc.size][acc bytes]       // optional trailer; absent or size=0 if null
      * ```
-     * The session-key trailer is optional so older payloads (without it) still parse.
+     * The session-key and accessory-data trailers are optional so older payloads still parse.
      */
     fun toByteArray(): ByteArray {
         val tokenBytes = discoveryToken ?: ByteArray(0)
         val keyBytes = sessionKey ?: ByteArray(0)
-        val size = 1 + 4 + 4 + 4 + 2 + uwbAddress.size + 2 + tokenBytes.size + 2 + keyBytes.size
+        val accBytes = accessoryData ?: ByteArray(0)
+        val size = 1 + 4 + 4 + 4 + 2 + uwbAddress.size + 2 + tokenBytes.size + 2 + keyBytes.size + 2 + accBytes.size
         val buf = ByteArray(size)
         var pos = 0
 
@@ -81,6 +91,12 @@ data class UwbSessionConfig(
         buf[pos++] = (keyBytes.size shr 8).toByte()
         buf[pos++] = keyBytes.size.toByte()
         keyBytes.copyInto(buf, pos)
+        pos += keyBytes.size
+
+        // accessoryData
+        buf[pos++] = (accBytes.size shr 8).toByte()
+        buf[pos++] = accBytes.size.toByte()
+        accBytes.copyInto(buf, pos)
 
         return buf
     }
@@ -92,12 +108,15 @@ data class UwbSessionConfig(
         val otherToken = other.discoveryToken ?: ByteArray(0)
         val thisKey = sessionKey ?: ByteArray(0)
         val otherKey = other.sessionKey ?: ByteArray(0)
+        val thisAcc = accessoryData ?: ByteArray(0)
+        val otherAcc = other.accessoryData ?: ByteArray(0)
         return sessionId == other.sessionId &&
                 channel == other.channel &&
                 preambleIndex == other.preambleIndex &&
                 uwbAddress.contentEquals(other.uwbAddress) &&
                 thisToken.contentEquals(otherToken) &&
-                thisKey.contentEquals(otherKey)
+                thisKey.contentEquals(otherKey) &&
+                thisAcc.contentEquals(otherAcc)
     }
 
     override fun hashCode(): Int {
@@ -107,6 +126,7 @@ data class UwbSessionConfig(
         result = 31 * result + uwbAddress.contentHashCode()
         result = 31 * result + (discoveryToken?.contentHashCode() ?: 0)
         result = 31 * result + (sessionKey?.contentHashCode() ?: 0)
+        result = 31 * result + (accessoryData?.contentHashCode() ?: 0)
         return result
     }
 
@@ -138,7 +158,15 @@ data class UwbSessionConfig(
             // Optional session-key trailer (absent in older payloads).
             val sessionKey = if (pos + 2 <= bytes.size) {
                 val keyLen = readShort(bytes, pos); pos += 2
-                if (keyLen > 0 && pos + keyLen <= bytes.size) bytes.copyOfRange(pos, pos + keyLen) else null
+                if (keyLen > 0 && pos + keyLen <= bytes.size) bytes.copyOfRange(pos, pos + keyLen).also { pos += keyLen } else null
+            } else {
+                null
+            }
+
+            // Optional accessory-data trailer (absent in older payloads).
+            val accessoryData = if (pos + 2 <= bytes.size) {
+                val accLen = readShort(bytes, pos); pos += 2
+                if (accLen > 0 && pos + accLen <= bytes.size) bytes.copyOfRange(pos, pos + accLen) else null
             } else {
                 null
             }
@@ -150,6 +178,7 @@ data class UwbSessionConfig(
                 uwbAddress = uwbAddress,
                 discoveryToken = discoveryToken,
                 sessionKey = sessionKey,
+                accessoryData = accessoryData,
             )
         }
 

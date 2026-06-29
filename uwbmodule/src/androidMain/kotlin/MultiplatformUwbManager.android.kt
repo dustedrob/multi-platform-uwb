@@ -22,6 +22,13 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
 
     private var rangingCallback: ((String, Double, Double?, Double?) -> Unit)? = null
     private var errorCallback: ((String) -> Unit)? = null
+
+    /**
+     * Stored for `expect` parity; unused on Android. androidx.core.uwb takes all ranging parameters
+     * up front and generates nothing post-`prepareSession`, so there is no data to send back to a peer
+     * (unlike iOS, where NI produces shareable configuration data after the session runs).
+     */
+    private var sendToPeerCallback: ((String, ByteArray) -> Unit)? = null
     private val coroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     /** The session scope obtained during [initialize], which provides our local UWB address. */
@@ -91,6 +98,14 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
         val scope = sessionScope
         if (scope == null) {
             errorCallback?.invoke("UWB not initialized. Call initialize() first.")
+            return
+        }
+
+        if (remoteConfig.accessoryData != null) {
+            // Host -> accessory ranging. androidx.core.uwb needs explicit FiRa parameters; mapping the
+            // accessory's configuration blob into RangingParameters is vendor-specific and hardware-
+            // dependent, so it is not implemented here (the iOS NI accessory path is the focus).
+            errorCallback?.invoke("Accessory ranging not yet supported on Android for $peerId")
             return
         }
 
@@ -187,6 +202,10 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
 
     actual fun setRangingCallback(callback: (peerId: String, distance: Double, azimuth: Double?, elevation: Double?) -> Unit) {
         rangingCallback = callback
+    }
+
+    actual fun setSendToPeerCallback(callback: (peerId: String, data: ByteArray) -> Unit) {
+        sendToPeerCallback = callback
     }
 
     actual fun setErrorCallback(callback: (error: String) -> Unit) {

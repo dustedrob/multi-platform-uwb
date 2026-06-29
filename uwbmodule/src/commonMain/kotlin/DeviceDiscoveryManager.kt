@@ -73,6 +73,9 @@ class DeviceDiscoveryManager(
     /** Peers we've initiated a config exchange with (to avoid duplicates). */
     private val pendingExchanges = mutableSetOf<String>()
 
+    /** Accessory peers — these stay BLE-connected during ranging and need a stop handshake. */
+    private val accessoryPeers = mutableSetOf<String>()
+
     companion object {
         /** Devices not seen within this window are considered stale and removed. */
         private const val STALE_THRESHOLD_MS = 10_000L
@@ -91,6 +94,12 @@ class DeviceDiscoveryManager(
 
         multiplatformUwbManager.setRangingCallback { peerId , distance , azimuth, elevation ->
             scope.launch { onRangingResult(peerId, distance, azimuth, elevation ) }
+        }
+
+        // Return path for the accessory protocol: data the UWB layer generates (e.g. iOS shareable
+        // configuration data) is written back to the accessory over the still-open BLE connection.
+        multiplatformUwbManager.setSendToPeerCallback { peerId, data ->
+            bleManager.sendToPeer(peerId, data)
         }
 
         multiplatformUwbManager.setErrorCallback { error ->
@@ -140,15 +149,20 @@ class DeviceDiscoveryManager(
         bleManager.stopAdvertising()
         bleManager.stopGattServer()
 
-        // Stop all active UWB ranging sessions
+        // Stop all active UWB ranging sessions. Accessory peers also get a BLE stop command so the
+        // accessory ends ranging and the BLE layer disconnects after its didStop confirmation.
         _nearbyDevices.value.forEach { device ->
             multiplatformUwbManager.stopRanging(device.id)
+            if (device.id in accessoryPeers) {
+                bleManager.sendToPeer(device.id, byteArrayOf(NI_ACCESSORY_STOP))
+            }
         }
 
         // Clear state
         _nearbyDevices.value = emptyList()
         exchangedPeers.clear()
         pendingExchanges.clear()
+        accessoryPeers.clear()
     }
 
     /**
@@ -224,6 +238,7 @@ class DeviceDiscoveryManager(
             if (peerId in exchangedPeers) return
             pendingExchanges.remove(peerId)
             exchangedPeers.add(peerId)
+            if (remoteConfig.accessoryData != null) accessoryPeers.add(peerId)
 
             emitEvent(
                 EventType.ConfigExchangeComplete, peerId,

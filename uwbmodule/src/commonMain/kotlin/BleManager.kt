@@ -44,6 +44,14 @@ expect class BleManager {
      */
     fun setConfigExchangedCallback(callback: (peerId: String, remoteConfig: UwbSessionConfig) -> Unit)
 
+    /**
+     * Write [data] to a still-connected accessory's control characteristic.
+     *
+     * Used by the accessory protocol after the initial config exchange (e.g. configure-and-start with
+     * iOS's shareable data, or stop). No-op if [peerId] isn't a connected accessory.
+     */
+    fun sendToPeer(peerId: String, data: ByteArray)
+
     /** Clean up BLE resources. Call when done using the manager. */
     fun cleanup()
 }

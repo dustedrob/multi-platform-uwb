@@ -30,6 +30,13 @@ actual class BleManager(
     // Pending config exchanges, keyed by peripheral UUID
     private val pendingConfigs = mutableMapOf<String, UwbSessionConfig>()
 
+    /** Live accessory connections kept open during ranging, for [sendToPeer] and the stop handshake. */
+    private data class AccessoryConnection(
+        val peripheral: CBPeripheral,
+        val writeChar: CBCharacteristic,
+    )
+    private val accessoryConnections = mutableMapOf<String, AccessoryConnection>()
+
     // Deferred operations waiting for poweredOn
     private var scanWhenReady = false
     private var advertiseWhenReady = false
@@ -48,6 +55,12 @@ actual class BleManager(
         } else {
             NSLog("BleManager: failed to parse config from $peerId")
         }
+    }
+
+    /** Deliver an accessory's raw configuration blob (opaque — wrapped, not parsed as our envelope). */
+    private fun deliverAccessoryConfig(peerId: String, raw: ByteArray) {
+        NSLog("BleManager: received accessory config from $peerId (${raw.size} bytes)")
+        configExchangedCallback?.invoke(peerId, UwbSessionConfig(0, 0, 0, ByteArray(0), accessoryData = raw))
     }
 
     /** Find a characteristic on a discovered service by UUID string (CBUUID normalizes short/long). */
@@ -191,6 +204,10 @@ actual class BleManager(
                         peripheral.setNotifyValue(true, notifyChar)
                         val initCmd = profile.initCommand ?: byteArrayOf(NI_ACCESSORY_INIT_COMMAND)
                         peripheral.writeValue(initCmd.toNSData(), writeChar, CBCharacteristicWriteWithoutResponse)
+                        // Keep the connection open for the rest of the accessory protocol
+                        // (configure-and-start, stop) — see sendToPeer.
+                        accessoryConnections[peripheral.identifier.UUIDString] =
+                            AccessoryConnection(peripheral, writeChar)
                         NSLog("BleManager: sent accessory init to ${peripheral.identifier.UUIDString}")
                     } else {
                         NSLog("BleManager: accessory characteristics not found")
@@ -252,13 +269,18 @@ actual class BleManager(
                     if (bytes == null || bytes.isEmpty()) return
                     when (bytes[0]) {
                         NI_ACCESSORY_CONFIG_DATA -> {
+                            // Opaque accessory config — deliver raw; the NI layer builds the session
+                            // and replies (via sendToPeer) with configure-and-start. Stay connected.
                             NSLog("BleManager: accessory sent config")
-                            deliverRemoteConfig(peerId, bytes.copyOfRange(1, bytes.size))
+                            deliverAccessoryConfig(peerId, bytes.copyOfRange(1, bytes.size))
+                        }
+                        NI_ACCESSORY_DID_START -> NSLog("BleManager: accessory did start")
+                        NI_ACCESSORY_DID_STOP -> {
+                            NSLog("BleManager: accessory did stop")
+                            accessoryConnections.remove(peerId)
                             centralManager?.cancelPeripheralConnection(peripheral)
                             pendingConfigs.remove(peerId)
                         }
-                        NI_ACCESSORY_DID_START -> NSLog("BleManager: accessory did start")
-                        NI_ACCESSORY_DID_STOP -> NSLog("BleManager: accessory did stop")
                         else -> NSLog("BleManager: unexpected accessory response ${bytes[0]}")
                     }
                 }
@@ -472,10 +494,22 @@ actual class BleManager(
         NSLog("BleManager: Connecting to $peerId for config exchange")
     }
 
+    actual fun sendToPeer(peerId: String, data: ByteArray) {
+        val conn = accessoryConnections[peerId]
+        if (conn == null) {
+            NSLog("BleManager: sendToPeer no open accessory connection for $peerId")
+            return
+        }
+        conn.peripheral.writeValue(data.toNSData(), conn.writeChar, CBCharacteristicWriteWithoutResponse)
+        NSLog("BleManager: sendToPeer wrote ${data.size} bytes to $peerId")
+    }
+
     actual fun cleanup() {
         stopScanning()
         stopAdvertising()
         stopGattServer()
+        accessoryConnections.values.forEach { centralManager?.cancelPeripheralConnection(it.peripheral) }
+        accessoryConnections.clear()
         discoveredPeripherals.clear()
         pendingConfigs.clear()
         deviceDiscoveredCallback = null

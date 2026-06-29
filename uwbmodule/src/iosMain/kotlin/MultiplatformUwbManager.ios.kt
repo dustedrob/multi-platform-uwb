@@ -15,6 +15,7 @@ import platform.NearbyInteraction.NIAlgorithmConvergenceStatusReasonInsufficient
 import platform.NearbyInteraction.NIAlgorithmConvergenceStatusReasonInsufficientMovement
 import platform.NearbyInteraction.NIAlgorithmConvergenceStatusReasonInsufficientVerticalSweep
 import platform.NearbyInteraction.NIDiscoveryToken
+import platform.NearbyInteraction.NINearbyAccessoryConfiguration
 import platform.NearbyInteraction.NINearbyObject
 import platform.NearbyInteraction.NINearbyObjectRemovalReason
 import platform.NearbyInteraction.NINearbyPeerConfiguration
@@ -29,6 +30,12 @@ actual class MultiplatformUwbManager {
     private var niSession: NISession? = null
     private var rangingCallback: ((String, Double, Double?, Double?) -> Unit)? = null
     private var errorCallback: ((String) -> Unit)? = null
+
+    /** Outbound channel to write data back to a peer over BLE (wired to BleManager.sendToPeer). */
+    private var sendToPeerCallback: ((String, ByteArray) -> Unit)? = null
+
+    /** The accessory peer currently being ranged (single-accessory session; multi-accessory is future). */
+    private var accessoryPeerId: String? = null
 
     /**
      * NearbyInteraction direction APIs (`horizontalAngle`, `verticalDirectionEstimate`) are iOS 16+.
@@ -109,6 +116,23 @@ actual class MultiplatformUwbManager {
             return
         }
 
+        // Accessory ranging: build an accessory configuration from the accessory's data blob. NI then
+        // generates shareable configuration data (see didGenerateShareableConfigurationData), which we
+        // write back to the accessory over BLE to actually start ranging.
+        val accessoryData = remoteConfig.accessoryData
+        if (accessoryData != null) {
+            val config = try {
+                NINearbyAccessoryConfiguration(accessoryData.toNSData(), null)
+            } catch (e: Exception) {
+                errorCallback?.invoke("Failed to build accessory configuration for $peerId: ${e.message}")
+                return
+            }
+            accessoryPeerId = peerId
+            NSLog("UwbManager: Starting accessory ranging with $peerId")
+            session.runWithConfiguration(config)
+            return
+        }
+
         val tokenBytes = remoteConfig.discoveryToken
         if (tokenBytes == null || tokenBytes.isEmpty()) {
             errorCallback?.invoke("No discovery token in remote config for $peerId")
@@ -144,7 +168,8 @@ actual class MultiplatformUwbManager {
 
     actual fun stopRanging(peerId: String) {
         activePeers.remove(peerId)
-        if (activePeers.isEmpty()) {
+        if (peerId == accessoryPeerId) accessoryPeerId = null
+        if (activePeers.isEmpty() && accessoryPeerId == null) {
             niSession?.pause()
             NSLog("UwbManager: Paused session (no active peers)")
         }
@@ -152,6 +177,10 @@ actual class MultiplatformUwbManager {
 
     actual fun setRangingCallback(callback: (peerId: String, distance: Double, azimuth: Double?, elevation: Double?) -> Unit) {
         rangingCallback = callback
+    }
+
+    actual fun setSendToPeerCallback(callback: (peerId: String, data: ByteArray) -> Unit) {
+        sendToPeerCallback = callback
     }
 
     actual fun setErrorCallback(callback: (error: String) -> Unit) {
@@ -162,6 +191,7 @@ actual class MultiplatformUwbManager {
         niSession?.invalidate()
         niSession = null
         activePeers.clear()
+        accessoryPeerId = null
         localDiscoveryToken = null
         sessionDelegate = null
         NSLog("UwbManager: Cleanup completed")
@@ -177,8 +207,11 @@ actual class MultiplatformUwbManager {
                     if (obj is NINearbyObject) {
                         val distance = obj.distance.toDouble()
                         if (!distance.isNaN()) {
+                            // Accessory objects aren't in activePeers (keyed by peer tokens), so fall
+                            // back to the tracked accessory peer.
                             val peerId = activePeers.entries
-                                .find { it.value == obj.discoveryToken }?.key ?: "unknown"
+                                .find { it.value == obj.discoveryToken }?.key
+                                ?: accessoryPeerId ?: "unknown"
 
                             // Azimuth (`horizontalAngle`) is iOS 16+ and is NaN until camera-assistance
                             // convergence, so only emit it when available and valid.
@@ -234,7 +267,16 @@ actual class MultiplatformUwbManager {
             didGenerateShareableConfigurationData: NSData,
             forObject: NINearbyObject
         ) {
-            // Shareable configuration data generated — not used in our BLE-based exchange
+            // Accessory ranging: NI produced the data the accessory needs to start. Send it back over
+            // BLE, prefixed with the configure-and-start message id.
+            val peerId = accessoryPeerId
+            if (peerId == null) {
+                NSLog("UwbManager: shareable config generated but no accessory peer tracked")
+                return
+            }
+            val payload = byteArrayOf(NI_ACCESSORY_CONFIGURE_AND_START) + didGenerateShareableConfigurationData.toByteArray()
+            NSLog("UwbManager: sending configure-and-start to $peerId (${payload.size} bytes)")
+            sendToPeerCallback?.invoke(peerId, payload)
         }
 
         override fun session(
