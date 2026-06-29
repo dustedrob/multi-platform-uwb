@@ -2,6 +2,7 @@ package com.dustedrob.uwb
 
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.useContents
+import platform.CoreFoundation.kCFNumberNaN
 import platform.Foundation.NSData
 import platform.Foundation.NSError
 import platform.Foundation.NSKeyedArchiver
@@ -24,11 +25,12 @@ import platform.NearbyInteraction.NISessionDelegateProtocol
 import platform.darwin.NSObject
 import platform.darwin.dispatch_async
 import platform.darwin.dispatch_get_main_queue
+import kotlin.math.atan2
 
 @OptIn(ExperimentalForeignApi::class)
 actual class MultiplatformUwbManager {
     private var niSession: NISession? = null
-    private var rangingCallback: ((String, Double, Double?, Double?) -> Unit)? = null
+    private var rangingCallback: ((String, Double, Double?, Any?) -> Unit)? = null
     private var errorCallback: ((String) -> Unit)? = null
 
     /** Outbound channel to write data back to a peer over BLE (wired to BleManager.sendToPeer). */
@@ -185,7 +187,7 @@ actual class MultiplatformUwbManager {
         }
     }
 
-    actual fun setRangingCallback(callback: (peerId: String, distance: Double, azimuth: Double?, elevation: Double?) -> Unit) {
+    actual fun setRangingCallback(callback: (peerId: String, distance: Double, azimuth: Double?, elevation: Any?) -> Unit) {
         rangingCallback = callback
     }
 
@@ -215,6 +217,7 @@ actual class MultiplatformUwbManager {
             dispatchToMain {
                 didUpdateNearbyObjects.forEach { obj ->
                     if (obj is NINearbyObject) {
+                        var elevation:Any? =null
                         val distance = obj.distance.toDouble()
                         if (!distance.isNaN()) {
                             // Accessory objects aren't in activePeers (keyed by peer tokens), so fall
@@ -231,11 +234,38 @@ actual class MultiplatformUwbManager {
                                 } else {
                                     null
                                 }
+                            
+                            /*if(obj.direction != kCFNumberNaN){  // should check for NaN
+                                elevation = atan2(obj.direction.getFloatAt(2), obj.direction.getFloatAt(1)) + 3.14159 / 2
+                            } else {
+                                when (obj.verticalDirectionEstimate) {
+                                    NINearbyObject.VerticalDirectionEstimate.above.rawValue -> {
+                                        elevation = "above"
+                                    }
 
-                            // NearbyInteraction exposes no elevation angle — `verticalDirectionEstimate`
+                                    NINearbyObject.VerticalDirectionEstimate.below.rawValue -> {
+                                        elevation = "below"
+                                    }
+
+                                    NINearbyObject.VerticalDirectionEstimate.same.rawValue -> {
+                                        elevation = "same"
+                                    }
+
+                                    NINearbyObject.VerticalDirectionEstimate.aboveOrBelow.rawValue, NINearbyObject.VerticalDirectionEstimate.unknown.rawValue -> {
+                                        elevation = "unknown"
+                                    }
+
+                                    else -> {
+                                        elevation = "unknown"
+                                    }
+                                }
+                            } */
+
+                            // on iPhone 11-13, NearbyInteraction exposes a vector (x/y/z) of floats simd_float3
+                            // on later iPhones exposes no numeric elevation angle — `verticalDirectionEstimate`
                             // is a direction category (above/below/same), not a measurement — so we
-                            // leave elevation null on iOS rather than emit a meaningless value.
-                            rangingCallback?.invoke(peerId, distance, azimuth, null)
+                            // set elevation to the float or the string
+                            rangingCallback?.invoke(peerId, distance, azimuth, elevation)
                         }
                     }
                 }
