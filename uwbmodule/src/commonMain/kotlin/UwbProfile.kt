@@ -108,10 +108,10 @@ val DEFAULT_PROFILES: List<UwbProfile> = listOf(LOCAL_PROFILE)
 
 /** Host -> accessory: initialize (request the accessory's configuration). */
 const val NI_ACCESSORY_INIT_COMMAND: Byte = 0x0A
-
+const val ANDROID_ACCESSORY_INIT_COMMAND: Byte = 0x1A
 /** Host -> accessory: configure and start ranging. */
 const val NI_ACCESSORY_CONFIGURE_AND_START: Byte = 0x0B
-
+const val ANDROID_ACCESSORY_CONFIGURE_AND_START: Byte = 0x1B
 /** Host -> accessory: stop ranging. */
 const val NI_ACCESSORY_STOP: Byte = 0x0C
 

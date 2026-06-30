@@ -85,9 +85,28 @@ actual class BleManager(
     }
 
     /** Deliver an accessory's raw configuration blob (opaque — wrapped, not parsed as our envelope). */
+    @RequiresPermission(BLUETOOTH_CONNECT)
     private fun deliverAccessoryConfig(peerId: String, raw: ByteArray) {
         Log.d(TAG, "received accessory config from $peerId (${raw.size} bytes)")
-        configExchangedCallback?.invoke(peerId, UwbSessionConfig(0, 0, 0, ByteArray(0), accessoryData = raw))
+        val remoteConfig = raw.let { UwbSessionConfig.fromByteArray(it) }
+        if (remoteConfig != null) {
+            // if the session key is not set
+            if(remoteConfig.sessionKey?.size == 0)
+                // use the generated one in the localConfig
+                remoteConfig.sessionKey = localConfig?.sessionKey
+            // if the sessionIDs don't match
+            if(remoteConfig.sessionId != localConfig?.sessionId)
+                // use the generated one in localConfig
+                remoteConfig.sessionId = localConfig?.sessionId!!
+            Log.d(TAG, "received config from $peerId")
+            configExchangedCallback?.invoke(peerId, remoteConfig) // this starts ranging
+            val message = byteArrayOf(ANDROID_ACCESSORY_CONFIGURE_AND_START)+ localConfig?.toByteArray()!!
+
+            Log.d(TAG,"sending config data message to accessory=${message.toHexString()}")
+            localConfig?.toByteArray()?.let { sendToPeer(peerId, message )}
+        } else {
+            Log.e(TAG, "failed to parse config from $peerId")
+        }
     }
 
     // ---- Scan callback ----
@@ -460,7 +479,7 @@ actual class BleManager(
                         return
                     }
                     queue = BleQueueManager(gatt)
-
+                    gatt.requestMtu(64);
                     when (profile.exchange) {
                         ExchangeProtocol.ReadWrite -> {
                             val readChar = profile.readFromUuid
@@ -482,15 +501,15 @@ actual class BleManager(
                                 // notifies its config back (handled in onCharacteristicChanged).
                                 gatt.setCharacteristicNotification(notifyChar, true)
                                 notifyChar.getDescriptor(cccdUuid)?.let { cccd ->
-                                    queue?.enqueue(
+                                    queue.enqueue(
                                         BleCommand.WriteDescriptor(
                                             cccd,
                                             BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
                                         )
                                     )
                                 }
-                                val initCmd = profile.initCommand ?: byteArrayOf(NI_ACCESSORY_INIT_COMMAND)
-                                queue?.enqueue(
+                                val initCmd = profile.initCommand ?: byteArrayOf(ANDROID_ACCESSORY_INIT_COMMAND)
+                                queue.enqueue(
                                     BleCommand.WriteCharacteristic(
                                         writeChar, initCmd,
                                         BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
@@ -498,7 +517,7 @@ actual class BleManager(
                                 )
                                 // Keep the connection open for the rest of the accessory protocol
                                 // (configure-and-start, stop) — see sendToPeer.
-                                queue?.let { accessoryConnections[peerId] = AccessoryConnection(gatt, writeChar, it) }
+                                queue.let { accessoryConnections[peerId] = AccessoryConnection(gatt, writeChar, it) }
                                 Log.d(TAG, "GATT client: sent accessory init to $peerId")
                             } else {
                                 Log.e(TAG, "GATT client: accessory characteristics not found on $peerId")
@@ -563,11 +582,12 @@ actual class BleManager(
                 private fun handleAccessoryNotify(gatt: BluetoothGatt, value: ByteArray) {
                     // First byte is the NI message id, the rest is the payload.
                     if (value.isEmpty()) return
+                    Log.d(TAG, "notify received ${value.size} bytes")
                     when (value[0]) {
                         NI_ACCESSORY_CONFIG_DATA -> {
                             // Opaque accessory config — deliver raw; the UWB layer builds the session
                             // and replies (via sendToPeer) with configure-and-start. Stay connected.
-                            Log.d(TAG, "GATT client: accessory sent config")
+                            Log.d(TAG, "GATT client: accessory sent config, ${value.toHexString()}")
                             deliverAccessoryConfig(peerId, value.copyOfRange(1, value.size))
                         }
                         NI_ACCESSORY_DID_START -> Log.d(TAG, "GATT client: accessory did start")
