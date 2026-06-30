@@ -158,7 +158,7 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
 
                 Log.d(
                     TAG,
-                    "Starting ranging with $peerId — session=${agreed.sessionId} ch=${agreed.channel}"
+                    "Starting ranging with $peerId — session=${agreed.sessionId.toHexString()} ch=${agreed.channel}"
                 )
 
                 scope.prepareSession(rangingParameters)

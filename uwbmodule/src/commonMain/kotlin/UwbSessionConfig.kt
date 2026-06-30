@@ -8,7 +8,7 @@ package com.dustedrob.uwb
  */
 data class UwbSessionConfig(
     /** Agreed-upon session identifier. Both peers must use the same value. */
-    val sessionId: Int,
+    var sessionId: Int,
     /** UWB channel number (e.g., 9). */
     val channel: Int,
     /** Preamble index for the UWB channel (e.g., 10). */
@@ -23,7 +23,7 @@ data class UwbSessionConfig(
      * Required by androidx.core.uwb for `CONFIG_UNICAST_DS_TWR`; both peers must
      * use the same key. Exchanged here so the two ends can agree on one.
      */
-    val sessionKey: ByteArray? = null,
+    var sessionKey: ByteArray? = null,
     /**
      * Opaque Apple/Qorvo Nearby-Interaction **Accessory Configuration Data** (iOS accessory) or null.
      *

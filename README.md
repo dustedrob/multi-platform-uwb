@@ -159,6 +159,18 @@ Alternatively, set your Team ID in `iosApp/Configuration/Config.xcconfig`:
 ```
 TEAM_ID=YOUR_TEAM_ID_HERE
 ```
+you will also need to set JAVA_HOME in the build phases or edit the  `iosApp/Configuration/Config.xcconfig`
+from the console do `which java`, and put in the path to the folder containing the bin folder
+like this 
+```
+which java
+/opt/homebrew/opt/openjdk@17/bin/java
+```
+you need add the line
+```
+JAVA_HOME=/opt/homebrew/opt/openjdk@17
+```
+
 
 Free (Personal Team) provisioning profiles are valid for 7 days and must be renewed by re-building from Xcode.
 
