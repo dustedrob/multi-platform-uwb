@@ -17,6 +17,10 @@ enum class DeviceState {
  * @property id Unique identifier (BLE address on Android, peripheral UUID on iOS).
  * @property name Human-readable device name from the BLE advertisement.
  * @property distance Current UWB-measured distance in meters, or `null` if not yet ranging.
+ * @property azimuth Horizontal angle to the device in degrees (0 = straight ahead, positive = right),
+ *   or `null` if direction isn't available yet.
+ * @property elevation Vertical angle to the device in degrees (positive = above), or `null` if
+ *   unavailable. Always `null` on iOS — NearbyInteraction reports no elevation measurement.
  * @property lastSeen Epoch millis when the device was last observed or ranged.
  * @property state Current connection state in the discovery pipeline.
  * @property errorMessage Error description if [state] is [DeviceState.Error].
