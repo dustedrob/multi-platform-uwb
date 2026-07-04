@@ -1,3 +1,4 @@
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -31,9 +32,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.PI
+import kotlin.math.cos
+import org.jetbrains.compose.ui.tooling.preview.Preview
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.dustedrob.uwb.DeviceState
 import com.dustedrob.uwb.DiscoveryEvent
@@ -229,16 +238,76 @@ private fun DeviceItem(device: NearbyDevice) {
                 }
             }
 
-            if (device.distance != null) {
-                val distStr = device.distance.toString()
-                val dotIdx = distStr.indexOf('.')
-                val formatted = if (dotIdx >= 0 && dotIdx + 3 < distStr.length) distStr.substring(0, dotIdx + 3) else distStr
-                Text(
-                    text = "${formatted}m",
-                    style = MaterialTheme.typography.h6,
-                    color = Color(0xFF4CAF50)
-                )
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                if (device.state == DeviceState.Ranging) {
+                    DirectionArrow(
+                        azimuthDeg = device.azimuth,
+                        elevationDeg = device.elevation,
+                        modifier = Modifier.size(48.dp)
+                    )
+                }
+                val dist = device.distance
+                if (dist != null) {
+                    Text(
+                        text = "${formatMeters(dist)}m",
+                        style = MaterialTheme.typography.subtitle1,
+                        color = Color(0xFF4CAF50)
+                    )
+                }
             }
+        }
+    }
+}
+
+/** Trims a distance in meters to 2 decimal places without pulling in platform formatting. */
+private fun formatMeters(meters: Double): String {
+    val s = meters.toString()
+    val dot = s.indexOf('.')
+    return if (dot >= 0 && dot + 3 < s.length) s.substring(0, dot + 3) else s
+}
+
+/**
+ * A small compass that draws an arrow pointing toward a ranging peer.
+ *
+ * [azimuthDeg] rotates the arrow (0 = straight ahead, positive = to the right) and
+ * [elevationDeg] foreshortens it (larger angle = shorter, i.e. more above/below than ahead).
+ * Both are in degrees. When [azimuthDeg] is `null` (direction not resolved yet) only the ring
+ * is drawn, so a card never looks broken while direction is still converging.
+ */
+@Composable
+private fun DirectionArrow(
+    azimuthDeg: Double?,
+    elevationDeg: Double?,
+    modifier: Modifier = Modifier,
+) {
+    val arrowColor = MaterialTheme.colors.primary
+    Canvas(modifier = modifier) {
+        val center = Offset(size.width / 2f, size.height / 2f)
+        val radius = size.minDimension / 2f * 0.85f
+
+        drawCircle(color = Color.LightGray, radius = radius, center = center, style = Stroke(width = 2f))
+
+        if (azimuthDeg == null) return@Canvas
+
+        val elevScale = elevationDeg?.let { cos(it * PI / 180.0).toFloat() } ?: 1f
+        val len = radius * elevScale
+
+        rotate(degrees = azimuthDeg.toFloat(), pivot = center) {
+            val tip = Offset(center.x, center.y - len)
+            drawLine(
+                color = arrowColor,
+                start = center,
+                end = tip,
+                strokeWidth = 4f,
+                cap = StrokeCap.Round
+            )
+            val head = Path().apply {
+                moveTo(tip.x, tip.y)
+                lineTo(tip.x - 7f, tip.y + 11f)
+                lineTo(tip.x + 7f, tip.y + 11f)
+                close()
+            }
+            drawPath(head, arrowColor)
         }
     }
 }
@@ -264,4 +333,107 @@ private fun EventLogItem(event: DiscoveryEvent) {
         color = color,
         modifier = Modifier.padding(vertical = 1.dp)
     )
+}
+
+// ---------------------------------------------------------------------------
+// Previews
+// ---------------------------------------------------------------------------
+
+@Preview
+@Composable
+private fun DirectionArrowPreview() {
+    Row(
+        modifier = Modifier.background(Color.White).padding(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        // Straight ahead
+        DirectionArrow(azimuthDeg = 0.0, elevationDeg = 0.0, modifier = Modifier.size(64.dp))
+        // 45° to the right
+        DirectionArrow(azimuthDeg = 45.0, elevationDeg = 0.0, modifier = Modifier.size(64.dp))
+        // To the left and tilted up (foreshortened)
+        DirectionArrow(azimuthDeg = -60.0, elevationDeg = 40.0, modifier = Modifier.size(64.dp))
+        // Direction not resolved yet — ring only
+        DirectionArrow(azimuthDeg = null, elevationDeg = null, modifier = Modifier.size(64.dp))
+    }
+}
+
+@Preview
+@Composable
+private fun DeviceItemPreview() {
+    Column(
+        modifier = Modifier.background(Color(0xFFFAFAFA)).padding(8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        // Ranging with resolved direction
+        DeviceItem(
+            NearbyDevice(
+                id = "AA:BB:CC:DD:EE:FF",
+                name = "Qorvo DWM3001",
+                distance = 1.234,
+                azimuth = 30.0,
+                elevation = 10.0,
+                state = DeviceState.Ranging,
+                sessionId = 42,
+                channel = 9,
+            )
+        )
+        // Ranging but direction not yet available
+        DeviceItem(
+            NearbyDevice(
+                id = "11:22:33:44:55:66",
+                name = "Pixel 8 Pro",
+                distance = 3.5,
+                azimuth = null,
+                elevation = null,
+                state = DeviceState.Ranging,
+                sessionId = 7,
+                channel = 9,
+            )
+        )
+        // Just discovered
+        DeviceItem(
+            NearbyDevice(
+                id = "77:88:99:AA:BB:CC",
+                name = "Unknown Device",
+                state = DeviceState.Discovered,
+            )
+        )
+        // Error state
+        DeviceItem(
+            NearbyDevice(
+                id = "DE:AD:BE:EF:00:11",
+                name = "Flaky Accessory",
+                state = DeviceState.Error,
+                errorMessage = "Peer disconnected",
+            )
+        )
+    }
+}
+
+@Preview
+@Composable
+private fun LocalDeviceInfoPreview() {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        LocalDeviceInfo(
+            config = UwbSessionConfig(
+                sessionId = 42,
+                channel = 9,
+                preambleIndex = 10,
+                uwbAddress = byteArrayOf(0x0A, 0x1B, 0x2C, 0x3D),
+            ),
+            isScanning = true,
+        )
+        LocalDeviceInfo(config = null, isScanning = false)
+    }
+}
+
+@Preview
+@Composable
+private fun EventLogItemPreview() {
+    Column(modifier = Modifier.background(Color(0xFFF5F5F5)).padding(4.dp)) {
+        EventLogItem(DiscoveryEvent(0L, EventType.DeviceDiscovered, "peer", "Discovered nearby device"))
+        EventLogItem(DiscoveryEvent(0L, EventType.RangingStarted, "peer", "Ranging started"))
+        EventLogItem(DiscoveryEvent(0L, EventType.ConfigExchangeComplete, "peer", "Config exchange complete"))
+        EventLogItem(DiscoveryEvent(0L, EventType.Error, "peer", "Something went wrong"))
+    }
 }

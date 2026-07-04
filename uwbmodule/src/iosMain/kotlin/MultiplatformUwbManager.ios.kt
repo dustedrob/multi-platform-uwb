@@ -1,5 +1,6 @@
 package com.dustedrob.uwb
 
+import kotlin.math.PI
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.useContents
 import platform.Foundation.NSData
@@ -224,10 +225,14 @@ actual class MultiplatformUwbManager {
                                 ?: accessoryPeerId ?: "unknown"
 
                             // Azimuth (`horizontalAngle`) is iOS 16+ and is NaN until camera-assistance
-                            // convergence, so only emit it when available and valid.
+                            // convergence, so only emit it when available and valid. NearbyInteraction
+                            // reports it in radians; convert to degrees to match the module contract
+                            // (Android reports degrees), so consumers get one consistent unit.
                             val azimuth: Double? =
                                 if (directionApiAvailable) {
-                                    obj.horizontalAngle.let { if (it.isNaN()) null else it.toDouble() }
+                                    obj.horizontalAngle.let {
+                                        if (it.isNaN()) null else it.toDouble() * 180.0 / PI
+                                    }
                                 } else {
                                     null
                                 }
