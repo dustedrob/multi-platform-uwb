@@ -150,6 +150,7 @@ actual class BleManager(
             NSLog("BleManager: Connected to $deviceId, discovering services")
             didConnectPeripheral.delegate = peripheralClientDelegate
             didConnectPeripheral.discoverServices(null)
+            didConnectPeripheral.maximumWriteValueLengthForType(64)
         }
 
         // Note: didFailToConnect and didDisconnect omitted to avoid ObjC selector conflicts

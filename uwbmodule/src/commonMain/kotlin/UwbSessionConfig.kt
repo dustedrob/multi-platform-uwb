@@ -32,6 +32,8 @@ data class UwbSessionConfig(
      * BLE layer wraps the accessory's raw payload in this field locally — it is not our own envelope.
      */
     val accessoryData: ByteArray? = null,
+    // indicates if this was created by accessory device info (android)
+    val isAccessoryDevice: Boolean = false,
 ) {
     /**
      * Serialize to a simple binary format for BLE GATT exchange.
@@ -133,7 +135,7 @@ data class UwbSessionConfig(
     companion object {
         private const val PROTOCOL_VERSION: Byte = 1
 
-        fun fromByteArray(bytes: ByteArray): UwbSessionConfig? {
+        fun fromByteArray(bytes: ByteArray, accessoryDevice: Boolean= false, accessoryData:ByteArray? = null): UwbSessionConfig? {
             if (bytes.size < 17) return null // minimum: 1(ver) + 4(sid) + 4(ch) + 4(pre) + 2(addrLen) + 2(tokLen)
             var pos = 0
 
@@ -179,6 +181,7 @@ data class UwbSessionConfig(
                 discoveryToken = discoveryToken,
                 sessionKey = sessionKey,
                 accessoryData = accessoryData,
+                isAccessoryDevice = accessoryDevice
             )
         }
 

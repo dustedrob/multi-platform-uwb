@@ -30,7 +30,9 @@ import androidx.annotation.RequiresPermission
 import androidx.core.content.ContextCompat
 import java.util.UUID
 
+private const val PREFERRED_MTU: Int = 256;
 actual class BleManager(
+
     private val context: Context,
     private val config: BleDiscoveryConfig = BleDiscoveryConfig(),
 ) {
@@ -38,6 +40,7 @@ actual class BleManager(
 
     /** Client Characteristic Configuration Descriptor — used to subscribe to notifications. */
     private val cccdUuid = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+
 
     private data class AccessoryDevice(
         val bleDevice: BluetoothDevice? = null,
@@ -88,10 +91,14 @@ actual class BleManager(
     @RequiresPermission(BLUETOOTH_CONNECT)
     private fun deliverAccessoryConfig(peerId: String, raw: ByteArray) {
         Log.d(TAG, "received accessory config from $peerId (${raw.size} bytes)")
-        val remoteConfig = raw.let { UwbSessionConfig.fromByteArray(it) }
+        val remoteConfig = raw.let { UwbSessionConfig.fromByteArray(it, true) }
         if (remoteConfig != null) {
+            if(localConfig == null) {// fail if not set
+                Log.e(TAG, "local config not created")
+                return
+            }
             // if the session key is not set
-            if(remoteConfig.sessionKey?.size == 0)
+            if(remoteConfig.sessionKey == null )
                 // use the generated one in the localConfig
                 remoteConfig.sessionKey = localConfig?.sessionKey
             // if the sessionIDs don't match
@@ -100,15 +107,17 @@ actual class BleManager(
                 remoteConfig.sessionId = localConfig?.sessionId!!
             Log.d(TAG, "received config from $peerId")
             configExchangedCallback?.invoke(peerId, remoteConfig) // this starts ranging
-            val message = byteArrayOf(ANDROID_ACCESSORY_CONFIGURE_AND_START)+ localConfig?.toByteArray()!!
-
-            Log.d(TAG,"sending config data message to accessory=${message.toHexString()}")
-            localConfig?.toByteArray()?.let { sendToPeer(peerId, message )}
+            Log.d(TAG," local device addr=${localConfig!!.uwbAddress.toHexString()} remote device addr=${remoteConfig.uwbAddress.toHexString()}")
         } else {
             Log.e(TAG, "failed to parse config from $peerId")
         }
     }
 
+    @RequiresPermission(BLUETOOTH_CONNECT)
+    private fun cleanUpGatt(gatt:BluetoothGatt ) {
+        gatt.disconnect();
+        gatt.close();
+    }
     // ---- Scan callback ----
 
     private val scanCallback = object : ScanCallback() {
@@ -301,6 +310,7 @@ actual class BleManager(
         }
     }
 
+
     // ---- Public API: Advertising ----
 
     @RequiresPermission(BLUETOOTH_CONNECT)
@@ -448,15 +458,19 @@ actual class BleManager(
         var queue: BleQueueManager? = null
 
         try {
-            device.connectGatt(context, false, object : BluetoothGattCallback() {
+            device.connectGatt(context, true, object : BluetoothGattCallback()  {
                 @RequiresPermission(BLUETOOTH_CONNECT)
                 override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
+                    if (status == 133) {
+                        // Handle Error 133 cleanly
+                        cleanUpGatt(gatt);
+                    }
                     if (newState == BluetoothProfile.STATE_CONNECTED) {
                         Log.d(TAG, "GATT client: connected to $peerId, discovering services")
                         gatt.discoverServices()
                     } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                         Log.d(TAG, "GATT client: disconnected from $peerId")
-                        gatt.close()
+                        //gatt.close()
                     }
                 }
 
@@ -478,8 +492,10 @@ actual class BleManager(
                         gatt.close()
                         return
                     }
-                    queue = BleQueueManager(gatt)
-                    gatt.requestMtu(64);
+                    // only instantiate once
+                    if(queue == null)
+                       queue = BleQueueManager(gatt)
+                    gatt.requestMtu(PREFERRED_MTU);
                     when (profile.exchange) {
                         ExchangeProtocol.ReadWrite -> {
                             val readChar = profile.readFromUuid
@@ -579,6 +595,7 @@ actual class BleManager(
                     handleAccessoryNotify(gatt, characteristic.value ?: return)
                 }
 
+                @RequiresPermission(BLUETOOTH_CONNECT)
                 private fun handleAccessoryNotify(gatt: BluetoothGatt, value: ByteArray) {
                     // First byte is the NI message id, the rest is the payload.
                     if (value.isEmpty()) return
@@ -595,6 +612,7 @@ actual class BleManager(
                             Log.d(TAG, "GATT client: accessory did stop")
                             accessoryConnections.remove(peerId)
                             gatt.disconnect()
+                            gatt.close()
                         }
                         else -> Log.d(TAG, "GATT client: unexpected accessory response ${value[0]}")
                     }
@@ -624,6 +642,7 @@ actual class BleManager(
                     // For phone-to-phone, the exchange ends once we've written our config back.
                     if (profile?.exchange == ExchangeProtocol.ReadWrite) {
                         gatt.disconnect()
+                        gatt.close()
                     }
                 }
             })
@@ -654,7 +673,7 @@ actual class BleManager(
         stopAdvertising()
         stopGattServer()
         if (hasConnectPermission()) {
-            accessoryConnections.values.forEach { it.gatt.disconnect() }
+            accessoryConnections.values.forEach { it.gatt.close() }
         }
         accessoryConnections.clear()
         discoveredDevices.clear()

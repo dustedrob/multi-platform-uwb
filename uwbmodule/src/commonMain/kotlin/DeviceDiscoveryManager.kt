@@ -238,11 +238,11 @@ class DeviceDiscoveryManager(
             if (peerId in exchangedPeers) return
             pendingExchanges.remove(peerId)
             exchangedPeers.add(peerId)
-            if (remoteConfig.accessoryData != null) accessoryPeers.add(peerId)
+            if (remoteConfig.isAccessoryDevice || remoteConfig.accessoryData!=null) accessoryPeers.add(peerId)
 
             emitEvent(
                 EventType.ConfigExchangeComplete, peerId,
-                "Config exchanged — session=${remoteConfig.sessionId.toHexString()} ch=${remoteConfig.channel}"
+                "Config exchanged — session=${remoteConfig.sessionId.toHexString()} ch=${remoteConfig.channel} addr=${remoteConfig.uwbAddress.toHexString()}"
             )
 
             // Ensure peer is in our device list and update with config info

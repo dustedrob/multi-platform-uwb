@@ -5,6 +5,7 @@ package com.dustedrob.uwb
  * and UWB session configuration exchange via GATT.
  */
 expect class BleManager {
+
     /** Start scanning for nearby UWB-capable devices. */
     fun startScanning()
 
