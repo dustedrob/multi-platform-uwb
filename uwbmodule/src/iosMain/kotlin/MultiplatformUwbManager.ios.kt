@@ -19,18 +19,22 @@ import platform.NearbyInteraction.NIDiscoveryToken
 import platform.NearbyInteraction.NINearbyAccessoryConfiguration
 import platform.NearbyInteraction.NINearbyObject
 import platform.NearbyInteraction.NINearbyObjectRemovalReason
+import platform.NearbyInteraction.NINearbyObjectVerticalDirectionEstimateAbove
+import platform.NearbyInteraction.NINearbyObjectVerticalDirectionEstimateBelow
+import platform.NearbyInteraction.NINearbyObjectVerticalDirectionEstimateSame
 import platform.NearbyInteraction.NINearbyPeerConfiguration
 import platform.NearbyInteraction.NISession
 import platform.NearbyInteraction.NISessionDelegateProtocol
 import platform.darwin.NSObject
 import platform.darwin.dispatch_async
 import platform.darwin.dispatch_get_main_queue
-import kotlin.math.atan2
+import kotlin.math.asin;
+import kotlin.math.PI;
 
 @OptIn(ExperimentalForeignApi::class)
 actual class MultiplatformUwbManager {
     private var niSession: NISession? = null
-    private var rangingCallback: ((String, Double, Double?, Any?) -> Unit)? = null
+    private var rangingCallback: ((String, Double, Double?, Double?, String?) -> Unit)? = null
     private var errorCallback: ((String) -> Unit)? = null
 
     /** Outbound channel to write data back to a peer over BLE (wired to BleManager.sendToPeer). */
@@ -187,7 +191,7 @@ actual class MultiplatformUwbManager {
         }
     }
 
-    actual fun setRangingCallback(callback: (peerId: String, distance: Double, azimuth: Double?, elevation: Any?) -> Unit) {
+    actual fun setRangingCallback(callback: (peerId: String, distance: Double, azimuth: Double?, elevation: Double?, elevationString:String?) -> Unit) {
         rangingCallback = callback
     }
 
@@ -217,7 +221,7 @@ actual class MultiplatformUwbManager {
             dispatchToMain {
                 didUpdateNearbyObjects.forEach { obj ->
                     if (obj is NINearbyObject) {
-                        var elevation:Any? =null
+                        var elevation:Double? =null
                         val distance = obj.distance.toDouble()
                         if (!distance.isNaN()) {
                             // Accessory objects aren't in activePeers (keyed by peer tokens), so fall
@@ -234,38 +238,26 @@ actual class MultiplatformUwbManager {
                                 } else {
                                     null
                                 }
-                            
-                            /*if(obj.direction != kCFNumberNaN){  // should check for NaN
-                                elevation = atan2(obj.direction.getFloatAt(2), obj.direction.getFloatAt(1)) + 3.14159 / 2
-                            } else {
+
+                            val elevation: Double? = if (directionApiAvailable) {
+                                // index x=0,y=1,z=2
+                                obj.direction.getFloatAt(2).let { asin(it).toDouble() * 180.0 / PI }
+                            } else null
+
+                            val elevationCategory: String? = if (directionApiAvailable && obj.direction == null) {
                                 when (obj.verticalDirectionEstimate) {
-                                    NINearbyObject.VerticalDirectionEstimate.above.rawValue -> {
-                                        elevation = "above"
-                                    }
-
-                                    NINearbyObject.VerticalDirectionEstimate.below.rawValue -> {
-                                        elevation = "below"
-                                    }
-
-                                    NINearbyObject.VerticalDirectionEstimate.same.rawValue -> {
-                                        elevation = "same"
-                                    }
-
-                                    NINearbyObject.VerticalDirectionEstimate.aboveOrBelow.rawValue, NINearbyObject.VerticalDirectionEstimate.unknown.rawValue -> {
-                                        elevation = "unknown"
-                                    }
-
-                                    else -> {
-                                        elevation = "unknown"
-                                    }
+                                    NINearbyObjectVerticalDirectionEstimateAbove -> "above"
+                                    NINearbyObjectVerticalDirectionEstimateBelow -> "below"
+                                    NINearbyObjectVerticalDirectionEstimateSame  -> "same"
+                                    else -> null
                                 }
-                            } */
+                            } else null
 
                             // on iPhone 11-13, NearbyInteraction exposes a vector (x/y/z) of floats simd_float3
                             // on later iPhones exposes no numeric elevation angle — `verticalDirectionEstimate`
                             // is a direction category (above/below/same), not a measurement — so we
                             // set elevation to the float or the string
-                            rangingCallback?.invoke(peerId, distance, azimuth, elevation)
+                            rangingCallback?.invoke(peerId, distance, azimuth, elevation, elevationCategory)
                         }
                     }
                 }

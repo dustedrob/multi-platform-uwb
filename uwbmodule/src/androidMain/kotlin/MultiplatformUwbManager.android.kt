@@ -20,7 +20,7 @@ import java.security.SecureRandom
 actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? = null) {
     private val TAG = "UwbManager"
 
-    private var rangingCallback: ((String, Double, Double?, Double?) -> Unit)? = null
+    private var rangingCallback: ((String, Double, Double?, Double?, String?) -> Unit)? = null
     private var errorCallback: ((String) -> Unit)? = null
 
     /**
@@ -174,7 +174,8 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
                                         peerId,
                                         distance.toDouble(),
                                         result.position.azimuth?.value?.toDouble(),
-                                        result.position.elevation?.value?.toDouble()
+                                        result.position.elevation?.value?.toDouble(),
+                                        result.position.elevation.toString()
                                     )
                                 }
                             }
@@ -200,7 +201,7 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
         }
     }
 
-    actual fun setRangingCallback(callback: (peerId: String, distance: Double, azimuth: Double?, elevation: Any?) -> Unit) {
+    actual fun setRangingCallback(callback: (peerId: String, distance: Double, azimuth: Double?, elevation: Double?, elevationString:String?) -> Unit) {
         rangingCallback = callback
     }
 
