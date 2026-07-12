@@ -93,21 +93,30 @@ actual class BleManager(
         Log.d(TAG, "received accessory config from $peerId (${raw.size} bytes)")
         val remoteConfig = raw.let { UwbSessionConfig.fromByteArray(it, true) }
         if (remoteConfig != null) {
-            if(localConfig == null) {// fail if not set
+            if (localConfig == null) { // we need our own address to send to the accessory (controller)
                 Log.e(TAG, "local config not created")
                 return
             }
-            // if the session key is not set
-            if(remoteConfig.sessionKey == null )
-                // use the generated one in the localConfig
-                remoteConfig.sessionKey = localConfig?.sessionKey
-            // if the sessionIDs don't match
-            if(remoteConfig.sessionId != localConfig?.sessionId)
-                // use the generated one in localConfig
-                remoteConfig.sessionId = localConfig?.sessionId!!
-            Log.d(TAG, "received config from $peerId")
+            // The phone runs a controlee session (see MultiplatformUwbManager.controleeSessionScope),
+            // so in FiRa terms the accessory is the controller and OWNS the session parameters
+            // (sessionId + static-STS key + channel + preamble). A controlee must adopt them rather
+            // than impose its own, so we deliver the accessory's parsed config unchanged and range on
+            // it; the phone only contributes its own device address (sent to the accessory via the
+            // configure-and-start message in MultiplatformUwbManager.startRanging).
+            //
+            // NOTE: this reverses the previous behaviour, which overwrote the accessory's sessionId
+            // (and substituted the phone's key) with the phone's local values. If the accessory
+            // firmware instead expects the phone to dictate sessionId/key, that authority is wrong and
+            // we'd want the opposite. Flagged for hardware validation.
+            Log.d(
+                TAG,
+                "accessory config adopted: session=${remoteConfig.sessionId.toHexString()} " +
+                    "ch=${remoteConfig.channel} preamble=${remoteConfig.preambleIndex} " +
+                    "key=${remoteConfig.sessionKey?.toHexString()} " +
+                    "accessoryAddr=${remoteConfig.uwbAddress.toHexString()} " +
+                    "localAddr=${localConfig!!.uwbAddress.toHexString()}"
+            )
             configExchangedCallback?.invoke(peerId, remoteConfig) // this starts ranging
-            Log.d(TAG," local device addr=${localConfig!!.uwbAddress.toHexString()} remote device addr=${remoteConfig.uwbAddress.toHexString()}")
         } else {
             Log.e(TAG, "failed to parse config from $peerId")
         }
