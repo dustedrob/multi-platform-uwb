@@ -171,7 +171,7 @@ private fun LocalDeviceInfo(config: UwbSessionConfig?, isScanning: Boolean) {
                     (byte.toInt() and 0xFF).toString(16).padStart(2, '0').uppercase()
                 }
                 Text("UWB Address: $addrHex", style = MaterialTheme.typography.caption)
-                Text("Session ID: ${config.sessionId}  Channel: ${config.channel}", style = MaterialTheme.typography.caption)
+                Text("Session ID: ${config.sessionId.toHexString()}  Channel: ${config.channel}", style = MaterialTheme.typography.caption)
             } else {
                 Text(
                     if (isScanning) "Initializing UWB…" else "Not started",
@@ -224,7 +224,7 @@ private fun DeviceItem(device: NearbyDevice) {
                 )
                 if (device.sessionId != null) {
                     Text(
-                        text = "Session: ${device.sessionId}  Ch: ${device.channel}",
+                        text = "Session: ${device.sessionId!!.toHexString()}  Ch: ${device.channel}",
                         style = MaterialTheme.typography.caption
                     )
                 }

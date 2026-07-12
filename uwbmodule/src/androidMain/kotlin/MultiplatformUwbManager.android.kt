@@ -46,7 +46,7 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
     /** Default channel and preamble — used when generating local config. */
     private companion object {
         const val DEFAULT_CHANNEL = 9
-        const val DEFAULT_PREAMBLE_INDEX = 10
+        const val DEFAULT_PREAMBLE_INDEX = 11
         const val SESSION_KEY_SIZE = 8
     }
 
@@ -84,6 +84,8 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
             .also { SecureRandom().nextBytes(it) }
             .also { localSessionKey = it }
 
+        Log.d(TAG, "phone address is ${localAddress.toHexString()}")
+
         return UwbSessionConfig(
             sessionId = sessionId,
             channel = DEFAULT_CHANNEL,
@@ -101,30 +103,26 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
             return
         }
 
-        if (remoteConfig.accessoryData != null) {
-            // Host -> accessory ranging. androidx.core.uwb needs explicit FiRa parameters; mapping the
-            // accessory's configuration blob into RangingParameters is vendor-specific and hardware-
-            // dependent, so it is not implemented here (the iOS NI accessory path is the focus).
-            errorCallback?.invoke("Accessory ranging not yet supported on Android for $peerId")
-            return
-        }
-
         // Cancel any existing ranging job for this peer
         activeJobs[peerId]?.cancel()
 
         val job = coroutineScope.launch {
             try {
                 // Use the remote peer's UWB address
-                val peerAddress = UwbAddress(remoteConfig.uwbAddress)
-                val peerDevice = UwbDevice(peerAddress)
+                //val peerAddress = UwbAddress(remoteConfig.uwbAddress)
+                //val peerDevice = UwbDevice(peerAddress)
+                //Log.d(TAG, "device address is ${remoteConfig.uwbAddress.toHexString()}")
 
                 // Deterministic agreement without a handshake: the peer with the
                 // lexicographically smaller UWB address is the initiator, and both
                 // peers adopt its full parameter set (session ID, channel, preamble,
                 // and static-STS key). Both ends hold both configs after the BLE
                 // exchange, so they independently compute the same values.
+
+                // unless it's an accessory device, in which case we should always use the remoteConfig
                 val localConfig = getLocalConfig()
-                val agreed = if (localConfig != null &&
+                Log.d(TAG,"accessory=${remoteConfig.isAccessoryDevice}")
+                var agreed = if (localConfig != null && !remoteConfig.isAccessoryDevice &&
                     compareAddresses(localConfig.uwbAddress, remoteConfig.uwbAddress) <= 0
                 ) {
                     localConfig
@@ -132,21 +130,27 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
                     remoteConfig
                 }
 
-                val sessionKey = agreed.sessionKey
-                if (sessionKey == null || sessionKey.size != SESSION_KEY_SIZE) {
+                // don't use a local variable
+                if (agreed.sessionKey == null || agreed.sessionKey!!.size != SESSION_KEY_SIZE) {
                     errorCallback?.invoke(
                         "Cannot range with $peerId: missing or invalid session key " +
                                 "(static STS requires $SESSION_KEY_SIZE bytes)"
                     )
+                    Log.d(TAG, "no sessionKey set for ${agreed.uwbAddress.toHexString()}")
                     activeJobs.remove(peerId)
                     return@launch
                 }
+
+                // Use the remote peer's UWB address
+                val peerAddress = UwbAddress(agreed.uwbAddress)
+                val peerDevice = UwbDevice(peerAddress)
+                Log.d(TAG, "ranging peer device address is ${agreed.uwbAddress.toHexString()}")
 
                 val rangingParameters = RangingParameters(
                     uwbConfigType = RangingParameters.CONFIG_UNICAST_DS_TWR,
                     sessionId = agreed.sessionId,
                     subSessionId = 0,
-                    sessionKeyInfo = sessionKey,
+                    sessionKeyInfo = agreed.sessionKey,
                     subSessionKeyInfo = null,
                     complexChannel = UwbComplexChannel(
                         channel = agreed.channel,
@@ -158,16 +162,25 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
 
                 Log.d(
                     TAG,
-                    "Starting ranging with $peerId — session=${agreed.sessionId} ch=${agreed.channel}"
+                    "Starting ranging with $peerId — session=${agreed.sessionId.toHexString()} ch=${agreed.channel} address=${agreed.uwbAddress.toHexString()}"
                 )
+
+                // if this is an accessory, send the config it should use now, as we have done all the pre-checking
+                if(agreed.isAccessoryDevice) {
+                    val message = byteArrayOf(ANDROID_ACCESSORY_CONFIGURE_AND_START)+ localConfig?.toByteArray()!!
+                    Log.d(TAG, "sending config data message to accessory=${message.toHexString()}")
+                    localConfig.toByteArray().let { sendToPeerCallback?.invoke(peerId, message) }
+                }
 
                 scope.prepareSession(rangingParameters)
                     .catch { exception ->
                         errorCallback?.invoke("Ranging failed for $peerId: ${exception.message}")
                     }
                     .collect { result ->
+                        Log.d(TAG, "in collect")
                         when (result) {
                             is RangingResult.RangingResultPosition -> {
+                                Log.d(TAG,"Ranging position report")
                                 val distance = result.position.distance?.value
                                 if (distance != null) {
                                     rangingCallback?.invoke(
@@ -178,18 +191,26 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
                                     )
                                 }
                             }
-
+                            is RangingResult.RangingResultInitialized ->{
+                                Log.d(TAG,"Ranging init")
+                            }
                             is RangingResult.RangingResultPeerDisconnected -> {
+                                Log.d(TAG,"peer disconnected")
                                 errorCallback?.invoke("Peer $peerId disconnected")
                                 activeJobs.remove(peerId)
+                            }
+                            else ->{
+                                Log.d(TAG,"unexpected ranging result ${result}")
                             }
                         }
                     }
             } catch (e: Exception) {
+                Log.d(TAG,"Ranging startup failed, ${e.message}")
                 errorCallback?.invoke("Failed to start ranging with $peerId: ${e.message}")
             }
+            Log.d(TAG,"Ranging active (maybe)")
         }
-
+        Log.d(TAG,"Ranging process starting for peer ${peerId}")
         activeJobs[peerId] = job
     }
 

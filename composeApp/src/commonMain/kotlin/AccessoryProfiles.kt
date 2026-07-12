@@ -12,8 +12,6 @@ import com.dustedrob.uwb.UwbProfile
 object QorvoNearbyProfile : UwbProfile {
     override val name = "QorvoNearby"
 
-    // The accessory advertises a beacon UUID distinct from the GATT service it hosts.
-    override val advertisedUuid = "11000000-27B9-42F0-82AA-2E951747BBF9"
     override val discoveryServiceUuid = "2E938FD0-6A61-11ED-A1EB-0242AC120002"
 
     override val readFromUuid = "2E93941C-6A61-11ED-A1EB-0242AC120002"   // readable char (props 0x2)
@@ -34,3 +32,4 @@ object NordicUartProfile : UwbProfile {
 
     override val exchange = ExchangeProtocol.AccessoryNotify
 }
+
