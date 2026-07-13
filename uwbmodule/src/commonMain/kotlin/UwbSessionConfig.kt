@@ -8,7 +8,7 @@ package com.dustedrob.uwb
  */
 data class UwbSessionConfig(
     /** Agreed-upon session identifier. Both peers must use the same value. */
-    var sessionId: Int,
+    val sessionId: Int?,
     /** UWB channel number (e.g., 9). */
     val channel: Int,
     /** Preamble index for the UWB channel (e.g., 10). */
@@ -23,7 +23,7 @@ data class UwbSessionConfig(
      * Required by androidx.core.uwb for `CONFIG_UNICAST_DS_TWR`; both peers must
      * use the same key. Exchanged here so the two ends can agree on one.
      */
-    var sessionKey: ByteArray? = null,
+    val sessionKey: ByteArray? = null,
     /**
      * Opaque Apple/Qorvo Nearby-Interaction **Accessory Configuration Data** (iOS accessory) or null.
      *
@@ -60,10 +60,10 @@ data class UwbSessionConfig(
         buf[pos++] = PROTOCOL_VERSION
 
         // sessionId
-        buf[pos++] = (sessionId shr 24).toByte()
-        buf[pos++] = (sessionId shr 16).toByte()
-        buf[pos++] = (sessionId shr 8).toByte()
-        buf[pos++] = sessionId.toByte()
+        buf[pos++] = (sessionId?.shr(24))?.toByte() ?: 0
+        buf[pos++] = (sessionId?.shr(16))?.toByte() ?: 0
+        buf[pos++] = (sessionId?.shr(8))?.toByte() ?: 0
+        buf[pos++] = sessionId?.toByte() ?: 0
 
         // channel
         buf[pos++] = (channel shr 24).toByte()
@@ -122,13 +122,13 @@ data class UwbSessionConfig(
     }
 
     override fun hashCode(): Int {
-        var result = sessionId
-        result = 31 * result + channel
-        result = 31 * result + preambleIndex
-        result = 31 * result + uwbAddress.contentHashCode()
-        result = 31 * result + (discoveryToken?.contentHashCode() ?: 0)
-        result = 31 * result + (sessionKey?.contentHashCode() ?: 0)
-        result = 31 * result + (accessoryData?.contentHashCode() ?: 0)
+        var result :Int = sessionId!!
+        result =  31 * result + channel
+        result =  31 * result + preambleIndex
+        result =  31 * result + uwbAddress.contentHashCode()
+        result =  31 * result + (discoveryToken?.contentHashCode() ?: 0)
+        result =  31 * result + (sessionKey?.contentHashCode() ?: 0)
+        result =  31 * result + (accessoryData?.contentHashCode() ?: 0)
         return result
     }
 

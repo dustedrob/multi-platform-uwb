@@ -79,7 +79,7 @@ actual class MultiplatformUwbManager {
         }
     }
 
-    actual fun getLocalConfig(): UwbSessionConfig? {
+    actual fun getLocalConfig(isAccessory:Boolean): UwbSessionConfig? {
         val token = localDiscoveryToken ?: return null
 
         // Serialize the discovery token via NSKeyedArchiver

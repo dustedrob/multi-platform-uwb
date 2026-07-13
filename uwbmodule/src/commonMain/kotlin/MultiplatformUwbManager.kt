@@ -20,7 +20,7 @@ expect class MultiplatformUwbManager {
      * On Android: contains local UWB address, proposed session ID, channel, preamble.
      * On iOS: contains serialized NI discovery token.
      */
-    fun getLocalConfig(): UwbSessionConfig?
+    fun getLocalConfig(isAccessory:Boolean= false): UwbSessionConfig?
 
     /**
      * Start ranging with a peer using exchanged configurations.
