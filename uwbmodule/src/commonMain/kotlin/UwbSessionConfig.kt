@@ -9,6 +9,7 @@ package com.dustedrob.uwb
 data class UwbSessionConfig(
     /** Agreed-upon session identifier. Both peers must use the same value. */
 
+
     val sessionId: Int,
 
     /** UWB channel number (e.g., 9). */
@@ -64,7 +65,7 @@ data class UwbSessionConfig(
 
         // Version
         buf[pos++] = PROTOCOL_VERSION
-        
+
         // sessionId (LE)
         buf[pos++] = sessionId.toByte()
         buf[pos++] = (sessionId shr 8).toByte()
