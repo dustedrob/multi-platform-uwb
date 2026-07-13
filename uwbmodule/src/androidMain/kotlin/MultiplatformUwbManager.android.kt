@@ -39,9 +39,9 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
     /** Active ranging coroutine jobs, keyed by peer ID. Cancel to stop ranging. */
     private val activeJobs = mutableMapOf<String, Job>()
 
+
     private val activeSessions = mutableMapOf<String, UwbSessionConfig>()
 
-    //private var controllerScope : UwbControllerSessionScope? = null
     /**
      * Our 8-byte static-STS session key, generated once and reused for the lifetime
      * of this manager so the value advertised over BLE matches the one used at ranging.
@@ -61,6 +61,7 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
             return
         }
         try {
+
             //val scope = androidUwbManager.controllerSessionScope()// androidUwbManager.controleeSessionScope()
             //sessionScope = scope
             // need this for ranging wit accessory, can't create later
@@ -88,6 +89,7 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
         // Generate a session ID from our address for deterministic agreement.
         // During config exchange, the initiator's sessionId is used by convention
         // (the peer with the lexicographically smaller address initiates).
+
         val sessionId:Int? = localAddress?.fold(0) { acc, b -> acc * 31 + (b.toInt() and 0xFF) }
 
         // Generate the static-STS key lazily and cache it, so the key we send over
@@ -137,7 +139,7 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
                     "ch=${remoteConfigAdjusted.channel} preamble=${remoteConfigAdjusted.preambleIndex} " +
                     "key=${remoteConfigAdjusted.sessionKey?.toHexString()} " +
                     "accessoryAddr=${remoteConfigAdjusted.uwbAddress.toHexString()} " +
-                    "localAddr=${sessionConfig!!.uwbAddress.toHexString()}"
+                    "localAddr=${sessionConfig.uwbAddress.toHexString()}"
         )
         // Cancel any existing ranging job for this peer
         activeJobs[peerId]?.cancel()
@@ -179,7 +181,7 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
                 val peerDevice = UwbDevice(peerAddress)
                 Log.d(TAG, "ranging peer device address is ${agreed.uwbAddress.toHexString()}")
 
-                val rangingParameters: RangingParameters? = RangingParameters(
+                val rangingParameters: RangingParameters = RangingParameters(
                     uwbConfigType = RangingParameters.CONFIG_UNICAST_DS_TWR,
                     sessionId = agreed.sessionId,
                     subSessionId = 0,
@@ -206,7 +208,8 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
                 }
 
 
-                rangingParameters?.let { ((activeSessions[peerId] as UwbSessionConfig).scope as UwbClientSessionScope).prepareSession(it) }
+
+                rangingParameters.let { ((activeSessions[peerId] as UwbSessionConfig).scope as UwbClientSessionScope).prepareSession(it) }
                     ?.catch { exception ->
                         errorCallback?.invoke("Ranging failed for $peerId: ${exception.message}")
                     }
@@ -294,3 +297,4 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
         coroutineScope.cancel()
         }
     }
+
