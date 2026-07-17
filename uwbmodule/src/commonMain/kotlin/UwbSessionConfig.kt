@@ -38,7 +38,7 @@ data class UwbSessionConfig(
     /**
      * Serialize to a simple binary format for BLE GATT exchange.
      *
-     * Format (big-endian):
+     * Format (little-endian):
      * ```
      * [1B version][4B sessionId][4B channel][4B preambleIndex]
      * [2B uwbAddr.size][uwbAddr bytes]
@@ -46,7 +46,11 @@ data class UwbSessionConfig(
      * [2B key.size][key bytes]       // optional trailer; absent or size=0 if null
      * [2B acc.size][acc bytes]       // optional trailer; absent or size=0 if null
      * ```
-     * The session-key and accessory-data trailers are optional so older payloads still parse.
+     * Multi-byte integers (sessionId, channel, preambleIndex, and the 2-byte length prefixes) are
+     * little-endian to match the FiRa/UWB convention, so accessory firmware can lay the struct out
+     * natively without byte-swapping. The byte-array fields (address, token, key) are opaque and are
+     * copied verbatim. The session-key and accessory-data trailers are optional so older/shorter
+     * payloads still parse.
      */
     fun toByteArray(): ByteArray {
         val tokenBytes = discoveryToken ?: ByteArray(0)
@@ -59,45 +63,45 @@ data class UwbSessionConfig(
         // Version
         buf[pos++] = PROTOCOL_VERSION
 
-        // sessionId
-        buf[pos++] = (sessionId shr 24).toByte()
-        buf[pos++] = (sessionId shr 16).toByte()
-        buf[pos++] = (sessionId shr 8).toByte()
+        // sessionId (LE)
         buf[pos++] = sessionId.toByte()
+        buf[pos++] = (sessionId shr 8).toByte()
+        buf[pos++] = (sessionId shr 16).toByte()
+        buf[pos++] = (sessionId shr 24).toByte()
 
-        // channel
-        buf[pos++] = (channel shr 24).toByte()
-        buf[pos++] = (channel shr 16).toByte()
-        buf[pos++] = (channel shr 8).toByte()
+        // channel (LE)
         buf[pos++] = channel.toByte()
+        buf[pos++] = (channel shr 8).toByte()
+        buf[pos++] = (channel shr 16).toByte()
+        buf[pos++] = (channel shr 24).toByte()
 
-        // preambleIndex
-        buf[pos++] = (preambleIndex shr 24).toByte()
-        buf[pos++] = (preambleIndex shr 16).toByte()
-        buf[pos++] = (preambleIndex shr 8).toByte()
+        // preambleIndex (LE)
         buf[pos++] = preambleIndex.toByte()
+        buf[pos++] = (preambleIndex shr 8).toByte()
+        buf[pos++] = (preambleIndex shr 16).toByte()
+        buf[pos++] = (preambleIndex shr 24).toByte()
 
         // uwbAddress
-        buf[pos++] = (uwbAddress.size shr 8).toByte()
         buf[pos++] = uwbAddress.size.toByte()
+        buf[pos++] = (uwbAddress.size shr 8).toByte()
         uwbAddress.copyInto(buf, pos)
         pos += uwbAddress.size
 
         // discoveryToken
-        buf[pos++] = (tokenBytes.size shr 8).toByte()
         buf[pos++] = tokenBytes.size.toByte()
+        buf[pos++] = (tokenBytes.size shr 8).toByte()
         tokenBytes.copyInto(buf, pos)
         pos += tokenBytes.size
 
         // sessionKey
-        buf[pos++] = (keyBytes.size shr 8).toByte()
         buf[pos++] = keyBytes.size.toByte()
+        buf[pos++] = (keyBytes.size shr 8).toByte()
         keyBytes.copyInto(buf, pos)
         pos += keyBytes.size
 
         // accessoryData
-        buf[pos++] = (accBytes.size shr 8).toByte()
         buf[pos++] = accBytes.size.toByte()
+        buf[pos++] = (accBytes.size shr 8).toByte()
         accBytes.copyInto(buf, pos)
 
         return buf
@@ -185,14 +189,15 @@ data class UwbSessionConfig(
             )
         }
 
+        // Little-endian readers (least-significant byte first), matching toByteArray.
         private fun readInt(bytes: ByteArray, offset: Int): Int =
-            ((bytes[offset].toInt() and 0xFF) shl 24) or
-                    ((bytes[offset + 1].toInt() and 0xFF) shl 16) or
-                    ((bytes[offset + 2].toInt() and 0xFF) shl 8) or
-                    (bytes[offset + 3].toInt() and 0xFF)
+            (bytes[offset].toInt() and 0xFF) or
+                    ((bytes[offset + 1].toInt() and 0xFF) shl 8) or
+                    ((bytes[offset + 2].toInt() and 0xFF) shl 16) or
+                    ((bytes[offset + 3].toInt() and 0xFF) shl 24)
 
         private fun readShort(bytes: ByteArray, offset: Int): Int =
-            ((bytes[offset].toInt() and 0xFF) shl 8) or
-                    (bytes[offset + 1].toInt() and 0xFF)
+            (bytes[offset].toInt() and 0xFF) or
+                    ((bytes[offset + 1].toInt() and 0xFF) shl 8)
     }
 }
