@@ -31,7 +31,7 @@ class UwbDiscoveryViewModel(
         managerFactory.createUwbManager(),
         // Phone-to-phone over LOCAL_PROFILE; also scan for the Qorvo accessory (app-owned profile).
         managerFactory.createBleManager(
-            BleDiscoveryConfig(profiles = listOf(LOCAL_PROFILE, QorvoNearbyProfile))
+            BleDiscoveryConfig(profiles = listOf(LOCAL_PROFILE,  QorvoNearbyProfile,  CNCustom))
         )
     )
     var permissionState by mutableStateOf(PermissionState.NotDetermined)
@@ -113,6 +113,6 @@ class UwbDiscoveryViewModel(
 
     override fun onCleared() {
         super.onCleared()
-        deviceDiscoveryManager.cleanup()
+        //deviceDiscoveryManager.cleanup()
     }
 }

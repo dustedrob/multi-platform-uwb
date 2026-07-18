@@ -139,26 +139,55 @@ class UwbSessionConfigTest {
     }
 
     @Test
-    fun parsesLegacyPayloadWithoutKeyTrailer() {
-        // A payload from before the session-key trailer existed: it ends right after
-        // the discovery-token block, with no [2B key.size] trailer at all.
+    fun parsesShortPayloadWithoutKeyTrailer() {
+        // A minimal payload that ends right after the discovery-token block, with no [2B key.size]
+        // trailer at all. Bytes are little-endian (LSB first), matching the wire format.
         val sid = 42
         val ch = 9
         val pre = 10
         val addr = byteArrayOf(0x01, 0x02)
-        val legacy = byteArrayOf(
+        val short = byteArrayOf(
             1, // version
-            (sid shr 24).toByte(), (sid shr 16).toByte(), (sid shr 8).toByte(), sid.toByte(),
-            (ch shr 24).toByte(), (ch shr 16).toByte(), (ch shr 8).toByte(), ch.toByte(),
-            (pre shr 24).toByte(), (pre shr 16).toByte(), (pre shr 8).toByte(), pre.toByte(),
-            (addr.size shr 8).toByte(), addr.size.toByte(), addr[0], addr[1],
+            sid.toByte(), (sid shr 8).toByte(), (sid shr 16).toByte(), (sid shr 24).toByte(),
+            ch.toByte(), (ch shr 8).toByte(), (ch shr 16).toByte(), (ch shr 24).toByte(),
+            pre.toByte(), (pre shr 8).toByte(), (pre shr 16).toByte(), (pre shr 24).toByte(),
+            addr.size.toByte(), (addr.size shr 8).toByte(), addr[0], addr[1],
             0, 0, // token size = 0
         )
-        val restored = UwbSessionConfig.fromByteArray(legacy)
+        val restored = UwbSessionConfig.fromByteArray(short)
         assertNotNull(restored)
         assertEquals(sid, restored.sessionId)
         assertNull(restored.sessionKey)
         assertNull(restored.accessoryData)
+    }
+
+    @Test
+    fun serializesMultiByteFieldsLittleEndian() {
+        // Pins the wire contract: multi-byte integers are little-endian (LSB first) so accessory
+        // firmware can lay out its FiRa struct natively (session_id = 0x691A4B22, channel = 9,
+        // preamble = 10, address_size = 2) without byte-swapping.
+        val config = UwbSessionConfig(
+            sessionId = 0x691A4B22,
+            channel = 9,
+            preambleIndex = 10,
+            uwbAddress = byteArrayOf(0x02, 0xC9.toByte()),
+        )
+        val b = config.toByteArray()
+        assertEquals(1.toByte(), b[0]) // version
+        // sessionId 0x691A4B22 -> 22 4B 1A 69
+        assertEquals(0x22.toByte(), b[1]); assertEquals(0x4B.toByte(), b[2])
+        assertEquals(0x1A.toByte(), b[3]); assertEquals(0x69.toByte(), b[4])
+        // channel 9 -> 09 00 00 00
+        assertEquals(0x09.toByte(), b[5]); assertEquals(0.toByte(), b[6])
+        assertEquals(0.toByte(), b[7]); assertEquals(0.toByte(), b[8])
+        // preambleIndex 10 -> 0A 00 00 00
+        assertEquals(0x0A.toByte(), b[9]); assertEquals(0.toByte(), b[10])
+        assertEquals(0.toByte(), b[11]); assertEquals(0.toByte(), b[12])
+        // address size 2 -> 02 00, then the 2 address bytes verbatim
+        assertEquals(0x02.toByte(), b[13]); assertEquals(0.toByte(), b[14])
+        assertEquals(0x02.toByte(), b[15]); assertEquals(0xC9.toByte(), b[16])
+        // and it round-trips
+        assertEquals(config, UwbSessionConfig.fromByteArray(b))
     }
 
     @Test

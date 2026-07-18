@@ -20,7 +20,7 @@ expect class MultiplatformUwbManager {
      * On Android: contains local UWB address, proposed session ID, channel, preamble.
      * On iOS: contains serialized NI discovery token.
      */
-    fun getLocalConfig(isAccessory:Boolean= false): UwbSessionConfig?
+    suspend fun getLocalConfig(isAccessory:Boolean): UwbSessionConfig?
 
     /**
      * Start ranging with a peer using exchanged configurations.
@@ -28,10 +28,10 @@ expect class MultiplatformUwbManager {
      * @param peerId Identifier for the peer (BLE device address/UUID).
      * @param remoteConfig The peer's [UwbSessionConfig] received via BLE GATT exchange.
      */
-    fun startRanging(peerId: String, remoteConfig: UwbSessionConfig)
+    suspend fun startRanging(peerId: String, remoteConfig: UwbSessionConfig)
 
     /** Stop ranging with the given peer. */
-    fun stopRanging(peerId: String)
+    suspend fun stopRanging(peerId: String)
 
     /** Register callback for ranging distance updates. */
     fun setRangingCallback(callback: (peerId: String, distance: Double, azimuth: Double?, elevation: Double?) -> Unit)
@@ -50,5 +50,5 @@ expect class MultiplatformUwbManager {
     fun setErrorCallback(callback: (error: String) -> Unit)
 
     /** Clean up resources and unbind services. Call when done using the manager. */
-    fun cleanup()
+    suspend fun cleanup()
 }
