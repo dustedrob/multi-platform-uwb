@@ -200,6 +200,15 @@ Add required permissions to `AndroidManifest.xml`:
 <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 ```
 
+> **Runtime permissions are the app's responsibility.** Declaring these in the manifest is not
+> enough — `BLUETOOTH_SCAN`, `BLUETOOTH_ADVERTISE`, `BLUETOOTH_CONNECT`, and `UWB_RANGING` are
+> runtime ("dangerous") permissions that the app must request from the user before scanning or
+> ranging. Note that `UWB_RANGING` (API 31+) is a **separate** permission that is *not* part of the
+> "Nearby devices" group, so granting the Bluetooth permissions does not grant it; without it,
+> ranging fails with `SecurityException: Caller does not hold UWB_RANGING permission`. moko-permissions
+> does not model `UWB_RANGING`, so request it via the platform API. See `Permissions.android.kt` and
+> `UwbDiscoveryViewModel.checkAndRequestPermissions()` in the sample app for a working example.
+
 ### iOS Configuration
 
 Add required permissions to `Info.plist`:
