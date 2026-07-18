@@ -118,6 +118,7 @@ class UwbDiscoveryViewModel(
 
     override fun onCleared() {
         super.onCleared()
-        //deviceDiscoveryManager.cleanup()
+        //deviceDiscoveryManager.cleanup()   <--- can't make this suspend..
+
     }
 }
