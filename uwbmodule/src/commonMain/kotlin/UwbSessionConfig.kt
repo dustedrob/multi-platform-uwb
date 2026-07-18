@@ -72,7 +72,6 @@ data class UwbSessionConfig(
         buf[pos++] = (sessionId shr 16).toByte()
         buf[pos++] = (sessionId shr 24).toByte()
 
-
         // channel (LE)
         buf[pos++] = channel.toByte()
         buf[pos++] = (channel shr 8).toByte()
