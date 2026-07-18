@@ -95,14 +95,18 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
 
         Log.d(TAG, "phone address is ${localAddress?.toHexString()}")
 
-        return UwbSessionConfig(
-            sessionId = sessionId,
-            channel = DEFAULT_CHANNEL,
-            preambleIndex = DEFAULT_PREAMBLE_INDEX,
-            uwbAddress = localAddress!!,
-            discoveryToken = null,
-            sessionKey = key,
-        )
+        return if(sessionId !=null ){
+             UwbSessionConfig(
+                sessionId = sessionId,
+                channel = DEFAULT_CHANNEL,
+                preambleIndex = DEFAULT_PREAMBLE_INDEX,
+                uwbAddress = localAddress,
+                discoveryToken = null,
+                sessionKey = key,
+            )
+        } else {
+            null
+        }
     }
 
     actual fun startRanging(peerId: String, remoteConfig: UwbSessionConfig) {
@@ -126,11 +130,11 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
         }
         Log.d(
             TAG,
-            "config merged: session=${remoteConfigAdjusted.sessionId?.toHexString()} " +
-                    "ch=${remoteConfigAdjusted.channel} preamble=${remoteConfigAdjusted.preambleIndex} " +
-                    "key=${remoteConfigAdjusted.sessionKey?.toHexString()} " +
-                    "remoteAddr=${remoteConfigAdjusted.uwbAddress.toHexString()} " +
-                    "localAddr=${localConfig!!.uwbAddress.toHexString()}"
+     "config merged: session=${remoteConfigAdjusted.sessionId?.toHexString()} " +
+            "ch=${remoteConfigAdjusted.channel} preamble=${remoteConfigAdjusted.preambleIndex} " +
+            "key=${remoteConfigAdjusted.sessionKey?.toHexString()} " +
+            "remoteAddr=${remoteConfigAdjusted.uwbAddress.toHexString()} " +
+            "localAddr=${localConfig!!.uwbAddress.toHexString()}"
         )
         // Cancel any existing ranging job for this peer
         activeJobs[peerId]?.cancel()
@@ -235,53 +239,53 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
                             }
                         }
                     }
-} catch (e: Exception) {
-Log.d(TAG,"Ranging startup failed, ${e.message}")
-errorCallback?.invoke("Failed to start ranging with $peerId: ${e.message}")
-}
-Log.d(TAG,"Ranging active (maybe)")
-}
-Log.d(TAG,"Ranging process starting for peer ${peerId}")
-activeJobs[peerId] = job
-}
+                } catch (e: Exception) {
+                Log.d(TAG,"Ranging startup failed, ${e.message}")
+                errorCallback?.invoke("Failed to start ranging with $peerId: ${e.message}")
+                }
+            Log.d(TAG,"Ranging active (maybe)")
+            }
+        Log.d(TAG,"Ranging process starting for peer ${peerId}")
+        activeJobs[peerId] = job
+    }
 
-actual fun stopRanging(peerId: String) {
-activeJobs.remove(peerId)?.let { job ->
-job.cancel()
-Log.d(TAG, "Stopped ranging with $peerId")
-}
-}
+    actual fun stopRanging(peerId: String) {
+        activeJobs.remove(peerId)?.let { job ->
+            job.cancel()
+            Log.d(TAG, "Stopped ranging with $peerId")
+        }
+    }
 
-actual fun setRangingCallback(callback: (peerId: String, distance: Double, azimuth: Double?, elevation: Double?) -> Unit) {
-rangingCallback = callback
-}
+    actual fun setRangingCallback(callback: (peerId: String, distance: Double, azimuth: Double?, elevation: Double?) -> Unit) {
+        rangingCallback = callback
+    }
 
-actual fun setSendToPeerCallback(callback: (peerId: String, data: ByteArray) -> Unit) {
-sendToPeerCallback = callback
-}
+    actual fun setSendToPeerCallback(callback: (peerId: String, data: ByteArray) -> Unit) {
+        sendToPeerCallback = callback
+    }
 
-actual fun setErrorCallback(callback: (error: String) -> Unit) {
-errorCallback = callback
-}
+    actual fun setErrorCallback(callback: (error: String) -> Unit) {
+        errorCallback = callback
+    }
 
-/**
-* Compare two UWB addresses lexicographically (unsigned, byte by byte).
-* Returns a negative value if [a] sorts before [b], positive if after, 0 if equal.
-*/
-private fun compareAddresses(a: ByteArray, b: ByteArray): Int {
-val len = minOf(a.size, b.size)
-for (i in 0 until len) {
-val diff = (a[i].toInt() and 0xFF) - (b[i].toInt() and 0xFF)
-if (diff != 0) return diff
-}
-return a.size - b.size
-}
+    /**
+    * Compare two UWB addresses lexicographically (unsigned, byte by byte).
+    * Returns a negative value if [a] sorts before [b], positive if after, 0 if equal.
+    */
+    private fun compareAddresses(a: ByteArray, b: ByteArray): Int {
+        val len = minOf(a.size, b.size)
+        for (i in 0 until len) {
+            val diff = (a[i].toInt() and 0xFF) - (b[i].toInt() and 0xFF)
+            if (diff != 0) return diff
+        }
+        return a.size - b.size
+    }
 
-/** Stop all sessions and clean up resources. */
-actual fun cleanup() {
-activeJobs.values.forEach { it.cancel() }
-activeJobs.clear()
-sessionScope = null
-coroutineScope.cancel()
-}
+    /** Stop all sessions and clean up resources. */
+    actual fun cleanup() {
+        activeJobs.values.forEach { it.cancel() }
+        activeJobs.clear()
+        sessionScope = null
+        coroutineScope.cancel()
+    }
 }

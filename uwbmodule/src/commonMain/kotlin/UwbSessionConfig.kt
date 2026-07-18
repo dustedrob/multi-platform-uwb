@@ -8,7 +8,7 @@ package com.dustedrob.uwb
  */
 data class UwbSessionConfig(
     /** Agreed-upon session identifier. Both peers must use the same value. */
-    val sessionId: Int?,
+    val sessionId: Int,
     /** UWB channel number (e.g., 9). */
     val channel: Int,
     /** Preamble index for the UWB channel (e.g., 10). */
@@ -122,7 +122,7 @@ data class UwbSessionConfig(
     }
 
     override fun hashCode(): Int {
-        var result :Int = sessionId!!
+        var result :Int = sessionId
         result =  31 * result + channel
         result =  31 * result + preambleIndex
         result =  31 * result + uwbAddress.contentHashCode()
@@ -172,17 +172,20 @@ data class UwbSessionConfig(
             } else {
                 null
             }
-
-            return UwbSessionConfig(
-                sessionId = sessionId,
-                channel = channel,
-                preambleIndex = preambleIndex,
-                uwbAddress = uwbAddress,
-                discoveryToken = discoveryToken,
-                sessionKey = sessionKey,
-                accessoryData = accessoryData,
-                isAccessoryDevice = accessoryDevice
-            )
+            return if(sessionId == 0)
+                null
+            else {
+                UwbSessionConfig(
+                    sessionId = sessionId,
+                    channel = channel,
+                    preambleIndex = preambleIndex,
+                    uwbAddress = uwbAddress,
+                    discoveryToken = discoveryToken,
+                    sessionKey = sessionKey,
+                    accessoryData = accessoryData,
+                    isAccessoryDevice = accessoryDevice
+                )
+            }
         }
 
         private fun readInt(bytes: ByteArray, offset: Int): Int =
