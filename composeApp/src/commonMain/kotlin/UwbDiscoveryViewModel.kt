@@ -89,6 +89,11 @@ class UwbDiscoveryViewModel(
             controller.providePermission(Permission.BLUETOOTH_SCAN)
             controller.providePermission(Permission.BLUETOOTH_ADVERTISE)
             controller.providePermission(Permission.BLUETOOTH_CONNECT)
+            // UWB_RANGING is a separate runtime permission not covered by moko / "Nearby devices".
+            if (!ensureUwbRangingPermission()) {
+                permissionState = PermissionState.Denied
+                return false
+            }
             permissionState = PermissionState.Granted
             true
         } catch (e: DeniedAlwaysException) {
