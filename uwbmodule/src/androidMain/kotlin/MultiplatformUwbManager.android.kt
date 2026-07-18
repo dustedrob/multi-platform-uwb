@@ -126,10 +126,10 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
         }
         Log.d(
             TAG,
-            "accessory config merged: session=${remoteConfigAdjusted.sessionId?.toHexString()} " +
+            "config merged: session=${remoteConfigAdjusted.sessionId?.toHexString()} " +
                     "ch=${remoteConfigAdjusted.channel} preamble=${remoteConfigAdjusted.preambleIndex} " +
                     "key=${remoteConfigAdjusted.sessionKey?.toHexString()} " +
-                    "accessoryAddr=${remoteConfigAdjusted.uwbAddress.toHexString()} " +
+                    "remoteAddr=${remoteConfigAdjusted.uwbAddress.toHexString()} " +
                     "localAddr=${localConfig!!.uwbAddress.toHexString()}"
         )
         // Cancel any existing ranging job for this peer
