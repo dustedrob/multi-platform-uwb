@@ -449,7 +449,7 @@ actual class BleManager(
         var queue: BleQueueManager? = null
 
         try {
-            device.connectGatt(context, true, object : BluetoothGattCallback()  {
+            device.connectGatt(context, false, object : BluetoothGattCallback()  {
                 @RequiresPermission(BLUETOOTH_CONNECT)
                 override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
                     if (status == 133) {
