@@ -240,8 +240,8 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
                         }
                     }
                 } catch (e: Exception) {
-                Log.d(TAG,"Ranging startup failed, ${e.message}")
-                errorCallback?.invoke("Failed to start ranging with $peerId: ${e.message}")
+                    Log.d(TAG,"Ranging startup failed, ${e.message}")
+                    errorCallback?.invoke("Failed to start ranging with $peerId: ${e.message}")
                 }
             Log.d(TAG,"Ranging active (maybe)")
             }
