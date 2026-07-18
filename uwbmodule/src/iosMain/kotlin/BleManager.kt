@@ -60,7 +60,7 @@ actual class BleManager(
     /** Deliver an accessory's raw configuration blob (opaque — wrapped, not parsed as our envelope). */
     private fun deliverAccessoryConfig(peerId: String, raw: ByteArray) {
         NSLog("BleManager: received accessory config from $peerId (${raw.size} bytes)")
-        configExchangedCallback?.invoke(peerId, UwbSessionConfig(0, 0, 0, ByteArray(0), accessoryData = raw))
+        configExchangedCallback?.invoke(peerId, UwbSessionConfig(0, 0, 0, 0,ByteArray(0), accessoryData = raw))
     }
 
     /** Find a characteristic on a discovered service by UUID string (CBUUID normalizes short/long). */

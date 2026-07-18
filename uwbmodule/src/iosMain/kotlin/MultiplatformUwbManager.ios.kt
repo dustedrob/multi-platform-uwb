@@ -79,7 +79,7 @@ actual class MultiplatformUwbManager {
         }
     }
 
-    actual fun getLocalConfig(isAccessory:Boolean): UwbSessionConfig? {
+    actual suspend fun getLocalConfig(isAccessory:Boolean): UwbSessionConfig? {
         val token = localDiscoveryToken ?: return null
 
         // Serialize the discovery token via NSKeyedArchiver
@@ -102,6 +102,7 @@ actual class MultiplatformUwbManager {
         val tokenBytes = tokenData.toByteArray()
 
         return UwbSessionConfig(
+            scope = 0,
             sessionId = 0, // Not used on iOS
             channel = 0,
             preambleIndex = 0,
@@ -110,7 +111,7 @@ actual class MultiplatformUwbManager {
         )
     }
 
-    actual fun startRanging(peerId: String, remoteConfig: UwbSessionConfig) {
+    actual suspend fun startRanging(peerId: String, remoteConfig: UwbSessionConfig) {
         val session = niSession
         if (session == null) {
             errorCallback?.invoke("NI session not initialized. Call initialize() first.")
@@ -177,7 +178,7 @@ actual class MultiplatformUwbManager {
         session.runWithConfiguration(config)
     }
 
-    actual fun stopRanging(peerId: String) {
+    actual suspend fun stopRanging(peerId: String) {
         activePeers.remove(peerId)
         if (peerId == accessoryPeerId) accessoryPeerId = null
         if (activePeers.isEmpty() && accessoryPeerId == null) {
@@ -198,7 +199,7 @@ actual class MultiplatformUwbManager {
         errorCallback = callback
     }
 
-    actual fun cleanup() {
+    actual suspend fun cleanup() {
         niSession?.invalidate()
         niSession = null
         activePeers.clear()
