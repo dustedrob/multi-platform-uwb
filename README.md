@@ -98,6 +98,8 @@ The library uses a callback-based system to bridge platform-specific implementat
 - Ranging callbacks provide real-time distance updates
 - Error callbacks handle platform-specific failures
 
+- Support for Ranging to Accessories supporting Android is documented in 
+- ANDROID_ACCESSORY_RANGING_README.md
 ---
 
 ## Setup & Installation
