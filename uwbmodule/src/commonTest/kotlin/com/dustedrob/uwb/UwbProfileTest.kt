@@ -4,6 +4,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertSame
+import kotlin.test.assertTrue
 
 class UwbProfileTest {
 
@@ -76,5 +77,48 @@ class UwbProfileTest {
             enableAccessoryProtocol = true,
         )
         assertEquals(listOf(LOCAL_PROFILE, accessoryProfile), config.activeProfiles)
+    }
+
+    @Test
+    fun activeProfilesFiltersEveryAccessoryProfileWhenDisabled() {
+        val secondAccessory = ServiceEntry(
+            name = "accessory2",
+            discoveryServiceUuid = "6E400001-B5A3-F393-E0A9-E50E24DCCA9E",
+            writeToUuid = "6E400002-B5A3-F393-E0A9-E50E24DCCA9E",
+            notifyFromUuid = "6E400003-B5A3-F393-E0A9-E50E24DCCA9E",
+            exchange = ExchangeProtocol.AccessoryNotify,
+        )
+        val config = BleDiscoveryConfig(
+            profiles = listOf(accessoryProfile, LOCAL_PROFILE, secondAccessory),
+        )
+        // Only the ReadWrite profile survives, and original order is preserved.
+        assertEquals(listOf(LOCAL_PROFILE), config.activeProfiles)
+    }
+
+    @Test
+    fun activeProfilesEmptyWhenAllAccessoryAndDisabled() {
+        val config = BleDiscoveryConfig(
+            profiles = listOf(accessoryProfile),
+            advertiseProfile = accessoryProfile.name,
+        )
+        assertTrue(config.activeProfiles.isEmpty())
+    }
+
+    @Test
+    fun activeProfilesEqualsProfilesForPeerToPeerOnly() {
+        // No accessory profiles present: the flag makes no difference.
+        val profiles = listOf(LOCAL_PROFILE)
+        assertEquals(profiles, BleDiscoveryConfig(profiles = profiles).activeProfiles)
+        assertEquals(
+            profiles,
+            BleDiscoveryConfig(profiles = profiles, enableAccessoryProtocol = true).activeProfiles,
+        )
+    }
+
+    @Test
+    fun defaultConfigHasNoAccessoryProfiles() {
+        // The vendor-free default is peer-to-peer only, so activeProfiles == profiles regardless.
+        val config = BleDiscoveryConfig()
+        assertEquals(config.profiles, config.activeProfiles)
     }
 }
