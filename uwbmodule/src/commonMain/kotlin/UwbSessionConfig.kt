@@ -7,11 +7,9 @@ package com.dustedrob.uwb
  * On iOS: contains the NearbyInteraction discovery token (serialized).
  */
 data class UwbSessionConfig(
+    val scope: Any,
     /** Agreed-upon session identifier. Both peers must use the same value. */
-
-
     val sessionId: Int,
-
     /** UWB channel number (e.g., 9). */
     val channel: Int,
     /** Preamble index for the UWB channel (e.g., 10). */
@@ -129,7 +127,7 @@ data class UwbSessionConfig(
     }
 
     override fun hashCode(): Int {
-        var result :Int = sessionId
+        var result :Int = sessionId!!
         result =  31 * result + channel
         result =  31 * result + preambleIndex
         result =  31 * result + uwbAddress.contentHashCode()
@@ -179,9 +177,10 @@ data class UwbSessionConfig(
             } else {
                 null
             }
-            // Note: sessionId == 0 is a valid value (iOS local configs use it, and the controller
-            // assigns the real id at ranging time), so it must not be treated as "not a config".
+
+            val localScope: Any = 0
             return UwbSessionConfig(
+                scope= localScope,
                 sessionId = sessionId,
                 channel = channel,
                 preambleIndex = preambleIndex,

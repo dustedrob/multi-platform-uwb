@@ -128,6 +128,6 @@ class UwbDiscoveryViewModel(
 
     override fun onCleared() {
         super.onCleared()
-        deviceDiscoveryManager.cleanup()
+        //deviceDiscoveryManager.cleanup()
     }
 }
