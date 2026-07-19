@@ -97,25 +97,7 @@ actual class BleManager(
                 Log.e(TAG, "local config not created")
                 return
             }
-            // The phone runs a controlee session (see MultiplatformUwbManager.controleeSessionScope),
-            // so in FiRa terms the accessory is the controller and OWNS the session parameters
-            // (sessionId + static-STS key + channel + preamble). A controlee must adopt them rather
-            // than impose its own, so we deliver the accessory's parsed config unchanged and range on
-            // it; the phone only contributes its own device address (sent to the accessory via the
-            // configure-and-start message in MultiplatformUwbManager.startRanging).
-            //
-            // NOTE: this reverses the previous behaviour, which overwrote the accessory's sessionId
-            // (and substituted the phone's key) with the phone's local values. If the accessory
-            // firmware instead expects the phone to dictate sessionId/key, that authority is wrong and
-            // we'd want the opposite. Flagged for hardware validation.
-            Log.d(
-                TAG,
-                "accessory config adopted: session=${remoteConfig.sessionId.toHexString()} " +
-                    "ch=${remoteConfig.channel} preamble=${remoteConfig.preambleIndex} " +
-                    "key=${remoteConfig.sessionKey?.toHexString()} " +
-                    "accessoryAddr=${remoteConfig.uwbAddress.toHexString()} " +
-                    "localAddr=${localConfig!!.uwbAddress.toHexString()}"
-            )
+
             configExchangedCallback?.invoke(peerId, remoteConfig) // this starts ranging
         } else {
             Log.e(TAG, "failed to parse config from $peerId")
@@ -467,7 +449,7 @@ actual class BleManager(
         var queue: BleQueueManager? = null
 
         try {
-            device.connectGatt(context, true, object : BluetoothGattCallback()  {
+            device.connectGatt(context, false, object : BluetoothGattCallback()  {
                 @RequiresPermission(BLUETOOTH_CONNECT)
                 override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
                     if (status == 133) {

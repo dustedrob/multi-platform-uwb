@@ -8,7 +8,10 @@ package com.dustedrob.uwb
  */
 data class UwbSessionConfig(
     /** Agreed-upon session identifier. Both peers must use the same value. */
-    var sessionId: Int,
+
+
+    val sessionId: Int,
+
     /** UWB channel number (e.g., 9). */
     val channel: Int,
     /** Preamble index for the UWB channel (e.g., 10). */
@@ -23,7 +26,7 @@ data class UwbSessionConfig(
      * Required by androidx.core.uwb for `CONFIG_UNICAST_DS_TWR`; both peers must
      * use the same key. Exchanged here so the two ends can agree on one.
      */
-    var sessionKey: ByteArray? = null,
+    val sessionKey: ByteArray? = null,
     /**
      * Opaque Apple/Qorvo Nearby-Interaction **Accessory Configuration Data** (iOS accessory) or null.
      *
@@ -126,13 +129,13 @@ data class UwbSessionConfig(
     }
 
     override fun hashCode(): Int {
-        var result = sessionId
-        result = 31 * result + channel
-        result = 31 * result + preambleIndex
-        result = 31 * result + uwbAddress.contentHashCode()
-        result = 31 * result + (discoveryToken?.contentHashCode() ?: 0)
-        result = 31 * result + (sessionKey?.contentHashCode() ?: 0)
-        result = 31 * result + (accessoryData?.contentHashCode() ?: 0)
+        var result :Int = sessionId
+        result =  31 * result + channel
+        result =  31 * result + preambleIndex
+        result =  31 * result + uwbAddress.contentHashCode()
+        result =  31 * result + (discoveryToken?.contentHashCode() ?: 0)
+        result =  31 * result + (sessionKey?.contentHashCode() ?: 0)
+        result =  31 * result + (accessoryData?.contentHashCode() ?: 0)
         return result
     }
 
@@ -176,17 +179,20 @@ data class UwbSessionConfig(
             } else {
                 null
             }
-
-            return UwbSessionConfig(
-                sessionId = sessionId,
-                channel = channel,
-                preambleIndex = preambleIndex,
-                uwbAddress = uwbAddress,
-                discoveryToken = discoveryToken,
-                sessionKey = sessionKey,
-                accessoryData = accessoryData,
-                isAccessoryDevice = accessoryDevice
-            )
+            return if(sessionId == 0)
+                null
+            else {
+                UwbSessionConfig(
+                    sessionId = sessionId,
+                    channel = channel,
+                    preambleIndex = preambleIndex,
+                    uwbAddress = uwbAddress,
+                    discoveryToken = discoveryToken,
+                    sessionKey = sessionKey,
+                    accessoryData = accessoryData,
+                    isAccessoryDevice = accessoryDevice
+                )
+            }
         }
 
         // Little-endian readers (least-significant byte first), matching toByteArray.

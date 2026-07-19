@@ -242,7 +242,7 @@ class DeviceDiscoveryManager(
 
             emitEvent(
                 EventType.ConfigExchangeComplete, peerId,
-                "Config exchanged — session=${remoteConfig.sessionId.toHexString()} ch=${remoteConfig.channel} addr=${remoteConfig.uwbAddress.toHexString()}"
+                "Config exchanged — session=${remoteConfig.sessionId?.toHexString()} ch=${remoteConfig.channel} addr=${remoteConfig.uwbAddress.toHexString()}"
             )
 
             // Ensure peer is in our device list and update with config info
