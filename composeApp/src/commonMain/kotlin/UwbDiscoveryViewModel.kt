@@ -29,9 +29,18 @@ class UwbDiscoveryViewModel(
 ) : ViewModel() {
     private val deviceDiscoveryManager = DeviceDiscoveryManager(
         managerFactory.createUwbManager(),
-        // Phone-to-phone over LOCAL_PROFILE; also scan for the Qorvo accessory (app-owned profile).
+        // Phone-to-phone over LOCAL_PROFILE, plus the Qorvo accessory (app-owned profile).
         managerFactory.createBleManager(
-            BleDiscoveryConfig(profiles = listOf(LOCAL_PROFILE, QorvoNearbyProfile))
+            BleDiscoveryConfig(
+                profiles = listOf(LOCAL_PROFILE, QorvoNearbyProfile),
+                // Opt in to the accessory (write-init / notify-back) protocol. It is OFF by default in
+                // the library because it only works against compatible accessory firmware (see the
+                // "Accessory ranging" section in the README). With it off, QorvoNearbyProfile above
+                // would be ignored and only phone-to-phone ranging would run. This sample turns it on
+                // so it can range with a flashed Qorvo/NXP board; drop this flag (or the profile) if
+                // you only need phone-to-phone.
+                enableAccessoryProtocol = true,
+            )
         )
     )
     var permissionState by mutableStateOf(PermissionState.NotDetermined)

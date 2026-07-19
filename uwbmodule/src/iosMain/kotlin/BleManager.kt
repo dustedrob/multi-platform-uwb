@@ -127,7 +127,7 @@ actual class BleManager(
 
                 // Match advertised service UUIDs against our profiles. CBUUID equality normalizes
                 // 16-bit (e.g. FFF0) vs full 128-bit base UUIDs, so no string slicing is needed.
-                config.profiles.forEach { p ->
+                config.activeProfiles.forEach { p ->
                     val target = CBUUID.UUIDWithString(p.advertisedUuid)
                     if (serviceUuids.any { it == target }) {
                         profile = p
@@ -389,8 +389,12 @@ actual class BleManager(
 
     // ---- Public API: Scanning ----
 
-    private fun scanServiceUuids(): List<CBUUID> =
-        config.profiles.map { CBUUID.UUIDWithString(it.advertisedUuid) }
+    private fun scanServiceUuids(): List<CBUUID> {
+        if (config.activeProfiles.size < config.profiles.size) {
+            NSLog("BleManager: accessory profiles ignored, set BleDiscoveryConfig.enableAccessoryProtocol to use them")
+        }
+        return config.activeProfiles.map { CBUUID.UUIDWithString(it.advertisedUuid) }
+    }
 
     actual fun startScanning() {
         val central = centralManager ?: CBCentralManager(centralDelegate, null).also {

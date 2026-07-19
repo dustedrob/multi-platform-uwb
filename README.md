@@ -221,6 +221,45 @@ Add required permissions to `Info.plist`:
 <string>This app uses Bluetooth to advertise UWB capabilities</string>
 ```
 
+### Accessory ranging (opt-in)
+
+Beyond phone-to-phone ranging, the library can range with a UWB **accessory** (a Qorvo/NXP
+board and similar). This is handled by profiles whose `exchange` is
+`ExchangeProtocol.AccessoryNotify`, and it is **off by default** because it requires **compatible
+accessory firmware** — the phone speaks a distinct, hardware-specific exchange to the device, not
+the standard peer-to-peer flow. Point a stock accessory at it and nothing will match.
+
+To enable it, add an accessory profile *and* set `enableAccessoryProtocol = true` on
+`BleDiscoveryConfig`:
+
+```kotlin
+managerFactory.createBleManager(
+    BleDiscoveryConfig(
+        profiles = listOf(LOCAL_PROFILE, QorvoNearbyProfile), // QorvoNearbyProfile is app-owned
+        enableAccessoryProtocol = true,                       // deliberate opt-in; default false
+    )
+)
+```
+
+When the flag is left `false`, any `AccessoryNotify` profiles are ignored for discovery and
+exchange (a warning is logged), so peer-to-peer ranging is unaffected. See
+`AccessoryProfiles.kt` and `UwbDiscoveryViewModel` in the sample app for a working setup.
+
+**How the exchange works (per accessory):**
+
+1. Phone scans, discovers the accessory by its advertised UUID, and connects.
+2. Phone writes an **init** command (`ANDROID_ACCESSORY_INIT_COMMAND`).
+3. Accessory notifies back a `UwbSessionConfig` (its UWB address, etc.).
+4. Phone acts as the FiRa **controller**: it assigns the session ID, static-STS key, channel, and
+   preamble, starts ranging, and writes a **configure-and-start** command
+   (`ANDROID_ACCESSORY_CONFIGURE_AND_START`) with that config back to the accessory.
+5. On stop, the phone sends a **stop** command and disconnects.
+
+The `UwbSessionConfig` wire format is little-endian to match the FiRa/UWB convention, so accessory
+firmware can lay its struct out natively. On iOS the equivalent path uses Apple's Nearby Interaction
+Accessory Protocol (`NINearbyAccessoryConfiguration`). The accessory firmware itself lives outside
+this repository and must implement the matching protocol.
+
 ---
 
 ## Usage

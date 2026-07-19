@@ -130,8 +130,27 @@ const val NI_ACCESSORY_DID_STOP: Byte = 0x03
  * @property profiles the service profiles to scan for and host on the local GATT server.
  * @property advertiseProfile the [UwbProfile.name] of the profile this device advertises as its own
  *   identity. Must match one of [profiles].
+ * @property enableAccessoryProtocol opt-in for the accessory (write-init / notify-back) exchange.
+ *   Off by default: [ExchangeProtocol.AccessoryNotify] profiles only work against **compatible
+ *   accessory firmware** (the app talks a distinct, hardware-specific protocol to the device), so it
+ *   must be turned on deliberately. When false, any accessory profiles in [profiles] are ignored for
+ *   discovery and exchange (see [activeProfiles]) — the app has to both add an accessory profile and
+ *   set this flag. Peer-to-peer ([ExchangeProtocol.ReadWrite]) profiles are unaffected.
  */
 data class BleDiscoveryConfig(
     val profiles: List<UwbProfile> = DEFAULT_PROFILES,
     val advertiseProfile: String = DEFAULT_PROFILES.first().name,
-)
+    val enableAccessoryProtocol: Boolean = false,
+) {
+    /**
+     * The profiles this device actually scans for and exchanges over. Identical to [profiles] when
+     * [enableAccessoryProtocol] is set; otherwise [ExchangeProtocol.AccessoryNotify] profiles are
+     * filtered out so the accessory protocol stays completely inert unless opted in.
+     */
+    val activeProfiles: List<UwbProfile>
+        get() = if (enableAccessoryProtocol) {
+            profiles
+        } else {
+            profiles.filter { it.exchange != ExchangeProtocol.AccessoryNotify }
+        }
+}

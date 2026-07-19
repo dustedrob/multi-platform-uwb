@@ -52,4 +52,29 @@ class UwbProfileTest {
         assertEquals("11000000-27B9-42F0-82AA-2E951747BBF9", accessory.advertisedUuid)
         assertEquals(ExchangeProtocol.AccessoryNotify, accessory.exchange)
     }
+
+    private val accessoryProfile = ServiceEntry(
+        name = "accessory",
+        discoveryServiceUuid = "2E938FD0-6A61-11ED-A1EB-0242AC120002",
+        writeToUuid = "2E93998A-6A61-11ED-A1EB-0242AC120002",
+        notifyFromUuid = "2E939AF2-6A61-11ED-A1EB-0242AC120002",
+        exchange = ExchangeProtocol.AccessoryNotify,
+    )
+
+    @Test
+    fun accessoryProtocolDisabledByDefault() {
+        val config = BleDiscoveryConfig(profiles = listOf(LOCAL_PROFILE, accessoryProfile))
+        // Off by default: accessory profiles are filtered out of the active set.
+        assertEquals(false, config.enableAccessoryProtocol)
+        assertEquals(listOf(LOCAL_PROFILE), config.activeProfiles)
+    }
+
+    @Test
+    fun accessoryProtocolEnabledIncludesAccessoryProfiles() {
+        val config = BleDiscoveryConfig(
+            profiles = listOf(LOCAL_PROFILE, accessoryProfile),
+            enableAccessoryProtocol = true,
+        )
+        assertEquals(listOf(LOCAL_PROFILE, accessoryProfile), config.activeProfiles)
+    }
 }
