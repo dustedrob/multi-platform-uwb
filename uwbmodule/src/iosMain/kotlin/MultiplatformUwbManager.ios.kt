@@ -51,11 +51,13 @@ actual class MultiplatformUwbManager {
 
     private val activeSessions = mutableMapOf<String, UwbSessionConfig>()
 
+    private val activeDelegates = mutableMapOf<NISession, SessionDelegate>()
+
     /** Our local discovery token, available after session creation. */
     //private var localDiscoveryToken: NIDiscoveryToken? = null
 
     /** Strong reference to delegate to prevent GC. */
-    //private var sessionDelegate: SessionDelegate? = null
+    private var sessionDelegate: SessionDelegate? = null
 
     /*actual suspend fun initialize(){
 
@@ -71,7 +73,7 @@ actual class MultiplatformUwbManager {
 
         val session = NISession();
         val delegate = SessionDelegate()
-
+        activeDelegates[session] = delegate
         session.delegate = delegate
 
         // The session's discoveryToken is available immediately after creation
@@ -181,6 +183,7 @@ actual class MultiplatformUwbManager {
         activePeers.remove(peerId)
         if (activePeers.isEmpty()) {
             ((activeSessions[peerId]?.scope) as NISession).pause()
+            activeDelegates.remove((activeSessions[peerId]?.scope) as NISession)
             activeSessions.remove(peerId)
             NSLog("UwbManager: Paused session (no active peers)")
         }
@@ -268,6 +271,7 @@ actual class MultiplatformUwbManager {
                 errorCallback?.invoke("NI Session error: $msg")
                 activePeers.clear()
                 activeSessions.clear()
+                activeDelegates.clear()
             }
         }
 
@@ -331,6 +335,9 @@ actual class MultiplatformUwbManager {
         }
 
         override fun sessionWasSuspended(session: NISession) {
+            val peerId:String = activeSessions.entries
+                .firstOrNull { it.value.scope  == session }?.key ?: "unknown"
+            NSLog("UwbManager: Session suspended for ${peerId}")
             dispatchToMain {
                 errorCallback?.invoke("NI Session was suspended")
             }
