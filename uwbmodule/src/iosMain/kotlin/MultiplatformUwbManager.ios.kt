@@ -3,6 +3,7 @@ package com.dustedrob.uwb
 import kotlin.math.PI
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.useContents
+import platform.CoreFoundation.kCFNumberNaN
 import platform.Foundation.NSData
 import platform.Foundation.NSError
 import platform.Foundation.NSKeyedArchiver
@@ -19,17 +20,22 @@ import platform.NearbyInteraction.NIDiscoveryToken
 import platform.NearbyInteraction.NINearbyAccessoryConfiguration
 import platform.NearbyInteraction.NINearbyObject
 import platform.NearbyInteraction.NINearbyObjectRemovalReason
+import platform.NearbyInteraction.NINearbyObjectVerticalDirectionEstimateAbove
+import platform.NearbyInteraction.NINearbyObjectVerticalDirectionEstimateBelow
+import platform.NearbyInteraction.NINearbyObjectVerticalDirectionEstimateSame
 import platform.NearbyInteraction.NINearbyPeerConfiguration
 import platform.NearbyInteraction.NISession
 import platform.NearbyInteraction.NISessionDelegateProtocol
 import platform.darwin.NSObject
 import platform.darwin.dispatch_async
 import platform.darwin.dispatch_get_main_queue
+import kotlin.math.asin;
+import kotlin.math.PI;
 
 @OptIn(ExperimentalForeignApi::class)
 actual class MultiplatformUwbManager {
     private var niSession: NISession? = null
-    private var rangingCallback: ((String, Double, Double?, Double?) -> Unit)? = null
+    private var rangingCallback: ((String, Double, Double?, Double?, String?) -> Unit)? = null
     private var errorCallback: ((String) -> Unit)? = null
 
     /** Outbound channel to write data back to a peer over BLE (wired to BleManager.sendToPeer). */
@@ -186,7 +192,7 @@ actual class MultiplatformUwbManager {
         }
     }
 
-    actual fun setRangingCallback(callback: (peerId: String, distance: Double, azimuth: Double?, elevation: Double?) -> Unit) {
+    actual fun setRangingCallback(callback: (peerId: String, distance: Double, azimuth: Double?, elevation: Double?, elevationString:String?) -> Unit) {
         rangingCallback = callback
     }
 
@@ -216,6 +222,7 @@ actual class MultiplatformUwbManager {
             dispatchToMain {
                 didUpdateNearbyObjects.forEach { obj ->
                     if (obj is NINearbyObject) {
+                        var elevation:Double? =null
                         val distance = obj.distance.toDouble()
                         if (!distance.isNaN()) {
                             // Accessory objects aren't in activePeers (keyed by peer tokens), so fall
@@ -237,10 +244,25 @@ actual class MultiplatformUwbManager {
                                     null
                                 }
 
-                            // NearbyInteraction exposes no elevation angle — `verticalDirectionEstimate`
+                            val elevation: Double? = if (directionApiAvailable) {
+                                // index x=0,y=1,z=2
+                                obj.direction.getFloatAt(2).let { asin(it).toDouble() * 180.0 / PI }
+                            } else null
+
+                            val elevationCategory: String? = if (directionApiAvailable && obj.direction == null) {
+                                when (obj.verticalDirectionEstimate) {
+                                    NINearbyObjectVerticalDirectionEstimateAbove -> "above"
+                                    NINearbyObjectVerticalDirectionEstimateBelow -> "below"
+                                    NINearbyObjectVerticalDirectionEstimateSame  -> "same"
+                                    else -> null
+                                }
+                            } else null
+
+                            // on iPhone 11-13, NearbyInteraction exposes a vector (x/y/z) of floats simd_float3
+                            // on later iPhones exposes no numeric elevation angle — `verticalDirectionEstimate`
                             // is a direction category (above/below/same), not a measurement — so we
-                            // leave elevation null on iOS rather than emit a meaningless value.
-                            rangingCallback?.invoke(peerId, distance, azimuth, null)
+                            // set elevation to the float or the string
+                            rangingCallback?.invoke(peerId, distance, azimuth, elevation, elevationCategory)
                         }
                     }
                 }

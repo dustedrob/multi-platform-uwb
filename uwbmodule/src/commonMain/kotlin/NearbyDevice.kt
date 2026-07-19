@@ -33,6 +33,7 @@ data class NearbyDevice(
     val distance: Double? = null,
     val azimuth: Double? = null,
     val elevation: Double? = null,
+    val elevationString:String? = null,
     val lastSeen: Long = getCurrentTimeMillis(),
     val state: DeviceState = DeviceState.Discovered,
     val errorMessage: String? = null,
