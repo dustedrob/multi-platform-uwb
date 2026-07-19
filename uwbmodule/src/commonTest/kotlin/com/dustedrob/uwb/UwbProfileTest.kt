@@ -66,7 +66,7 @@ class UwbProfileTest {
     fun accessoryProtocolDisabledByDefault() {
         val config = BleDiscoveryConfig(profiles = listOf(LOCAL_PROFILE, accessoryProfile))
         // Off by default: accessory profiles are filtered out of the active set.
-        assertEquals(false, config.enableAccessoryProtocol)
+        assertEquals(false, config.enableAndroidAccessoryProtocol)
         assertEquals(listOf(LOCAL_PROFILE), config.activeProfiles)
     }
 
@@ -74,7 +74,7 @@ class UwbProfileTest {
     fun accessoryProtocolEnabledIncludesAccessoryProfiles() {
         val config = BleDiscoveryConfig(
             profiles = listOf(LOCAL_PROFILE, accessoryProfile),
-            enableAccessoryProtocol = true,
+            enableAndroidAccessoryProtocol = true,
         )
         assertEquals(listOf(LOCAL_PROFILE, accessoryProfile), config.activeProfiles)
     }
@@ -111,7 +111,7 @@ class UwbProfileTest {
         assertEquals(profiles, BleDiscoveryConfig(profiles = profiles).activeProfiles)
         assertEquals(
             profiles,
-            BleDiscoveryConfig(profiles = profiles, enableAccessoryProtocol = true).activeProfiles,
+            BleDiscoveryConfig(profiles = profiles, enableAndroidAccessoryProtocol = true).activeProfiles,
         )
     }
 

@@ -33,13 +33,14 @@ class UwbDiscoveryViewModel(
         managerFactory.createBleManager(
             BleDiscoveryConfig(
                 profiles = listOf(LOCAL_PROFILE, QorvoNearbyProfile),
-                // Opt in to the accessory (write-init / notify-back) protocol. It is OFF by default in
-                // the library because it only works against compatible accessory firmware (see the
-                // "Accessory ranging" section in the README). With it off, QorvoNearbyProfile above
-                // would be ignored and only phone-to-phone ranging would run. This sample turns it on
-                // so it can range with a flashed Qorvo/NXP board; drop this flag (or the profile) if
-                // you only need phone-to-phone.
-                enableAccessoryProtocol = true,
+                // Opt in to the Android accessory protocol (the bespoke write-init / notify-back
+                // exchange). It is OFF by default in the library because on Android it only works
+                // against compatible custom accessory firmware (see the "Accessory ranging" section in
+                // the README). With it off, QorvoNearbyProfile above is ignored on Android and only
+                // phone-to-phone ranging runs; this sample turns it on so it can range with a flashed
+                // Qorvo/NXP board. It is Android-only: iOS ranges with the accessory via Apple's
+                // standard protocol whether or not this is set.
+                enableAndroidAccessoryProtocol = true,
             )
         )
     )

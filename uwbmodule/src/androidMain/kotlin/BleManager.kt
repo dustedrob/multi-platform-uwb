@@ -277,7 +277,7 @@ actual class BleManager(
                 .build()
 
             if (config.activeProfiles.size < config.profiles.size) {
-                Log.w(TAG, "Accessory profiles ignored: set BleDiscoveryConfig.enableAccessoryProtocol to use them")
+                Log.w(TAG, "Accessory profiles ignored: set BleDiscoveryConfig.enableAndroidAccessoryProtocol to use them")
             }
             val filters: MutableList<ScanFilter> = mutableListOf()
             config.activeProfiles.forEach { profile ->
