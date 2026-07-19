@@ -179,20 +179,18 @@ data class UwbSessionConfig(
             } else {
                 null
             }
-            return if(sessionId == 0)
-                null
-            else {
-                UwbSessionConfig(
-                    sessionId = sessionId,
-                    channel = channel,
-                    preambleIndex = preambleIndex,
-                    uwbAddress = uwbAddress,
-                    discoveryToken = discoveryToken,
-                    sessionKey = sessionKey,
-                    accessoryData = accessoryData,
-                    isAccessoryDevice = accessoryDevice
-                )
-            }
+            // Note: sessionId == 0 is a valid value (iOS local configs use it, and the controller
+            // assigns the real id at ranging time), so it must not be treated as "not a config".
+            return UwbSessionConfig(
+                sessionId = sessionId,
+                channel = channel,
+                preambleIndex = preambleIndex,
+                uwbAddress = uwbAddress,
+                discoveryToken = discoveryToken,
+                sessionKey = sessionKey,
+                accessoryData = accessoryData,
+                isAccessoryDevice = accessoryDevice
+            )
         }
 
         // Little-endian readers (least-significant byte first), matching toByteArray.

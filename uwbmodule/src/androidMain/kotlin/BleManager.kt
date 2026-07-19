@@ -121,7 +121,7 @@ actual class BleManager(
 
             var profile: UwbProfile? = null
             result.scanRecord?.serviceUuids?.forEach { uuid ->
-                config.profiles.forEach { p ->
+                config.activeProfiles.forEach { p ->
                     // Android normalizes 16-bit advertisements to the full base UUID, so a plain
                     // case-insensitive full-string compare matches both short and long forms.
                     if (profile == null && p.advertisedUuid.equals(uuid.toString(), ignoreCase = true)) {
@@ -276,8 +276,11 @@ actual class BleManager(
                 .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
                 .build()
 
+            if (config.activeProfiles.size < config.profiles.size) {
+                Log.w(TAG, "Accessory profiles ignored: set BleDiscoveryConfig.enableAndroidAccessoryProtocol to use them")
+            }
             val filters: MutableList<ScanFilter> = mutableListOf()
-            config.profiles.forEach { profile ->
+            config.activeProfiles.forEach { profile ->
                 val scanFilter = ScanFilter.Builder()
                     .setServiceUuid(ParcelUuid(UUID.fromString(profile.advertisedUuid.uppercase())))
                     .build()

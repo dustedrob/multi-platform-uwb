@@ -389,6 +389,8 @@ actual class BleManager(
 
     // ---- Public API: Scanning ----
 
+    // iOS uses all profiles: accessory ranging here is Apple's standard NI Accessory Protocol,
+    // which is not gated by BleDiscoveryConfig.enableAndroidAccessoryProtocol (that flag is Android-only).
     private fun scanServiceUuids(): List<CBUUID> =
         config.profiles.map { CBUUID.UUIDWithString(it.advertisedUuid) }
 

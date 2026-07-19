@@ -130,8 +130,32 @@ const val NI_ACCESSORY_DID_STOP: Byte = 0x03
  * @property profiles the service profiles to scan for and host on the local GATT server.
  * @property advertiseProfile the [UwbProfile.name] of the profile this device advertises as its own
  *   identity. Must match one of [profiles].
+ * @property enableAndroidAccessoryProtocol opt-in for the **Android** accessory protocol — the
+ *   bespoke write-init / notify-back exchange that carries a [UwbSessionConfig] and makes the phone
+ *   the FiRa controller. Off by default because it only works against **compatible custom accessory
+ *   firmware**, so it must be turned on deliberately. When false, [ExchangeProtocol.AccessoryNotify]
+ *   profiles are excluded from discovery on Android (see [activeProfiles]).
+ *
+ *   This flag is **Android-only**. On iOS, accessory ranging uses Apple's *standard* Nearby
+ *   Interaction Accessory Protocol (`NINearbyAccessoryConfiguration`), which works with stock
+ *   accessory firmware, so iOS honors any accessory profile whenever it is present regardless of this
+ *   flag. Peer-to-peer ([ExchangeProtocol.ReadWrite]) profiles are unaffected on both platforms.
  */
 data class BleDiscoveryConfig(
     val profiles: List<UwbProfile> = DEFAULT_PROFILES,
     val advertiseProfile: String = DEFAULT_PROFILES.first().name,
-)
+    val enableAndroidAccessoryProtocol: Boolean = false,
+) {
+    /**
+     * The profiles used for discovery on **Android** after applying [enableAndroidAccessoryProtocol]:
+     * identical to [profiles] when the flag is set, otherwise [ExchangeProtocol.AccessoryNotify]
+     * profiles are filtered out so the Android accessory protocol stays inert unless opted in. iOS
+     * uses [profiles] directly (its accessory path is the standard Apple protocol).
+     */
+    val activeProfiles: List<UwbProfile>
+        get() = if (enableAndroidAccessoryProtocol) {
+            profiles
+        } else {
+            profiles.filter { it.exchange != ExchangeProtocol.AccessoryNotify }
+        }
+}

@@ -217,4 +217,104 @@ class UwbSessionConfigTest {
         assertNull(restored.accessoryData)
         assertTrue(restored.sessionKey!!.size == 8)
     }
+
+    @Test
+    fun sessionIdZeroRoundTrips() {
+        // Regression guard: fromByteArray must NOT treat sessionId == 0 as "not a config".
+        val config = UwbSessionConfig(
+            sessionId = 0,
+            channel = 9,
+            preambleIndex = 10,
+            uwbAddress = byteArrayOf(0x0A, 0x0B),
+        )
+        val restored = UwbSessionConfig.fromByteArray(config.toByteArray())
+        assertNotNull(restored)
+        assertEquals(0, restored.sessionId)
+        assertEquals(config, restored)
+    }
+
+    @Test
+    fun iosStyleConfigRoundTrips() {
+        // iOS local configs use sessionId = 0, empty address, and a discovery token; this must parse
+        // on the receiving (e.g. Android) side.
+        val token = ByteArray(64) { (it * 3).toByte() }
+        val config = UwbSessionConfig(
+            sessionId = 0,
+            channel = 0,
+            preambleIndex = 0,
+            uwbAddress = ByteArray(0),
+            discoveryToken = token,
+        )
+        val restored = UwbSessionConfig.fromByteArray(config.toByteArray())
+        assertNotNull(restored)
+        assertEquals(0, restored.sessionId)
+        assertTrue(token.contentEquals(restored.discoveryToken!!))
+        assertNull(restored.sessionKey)
+        assertNull(restored.accessoryData)
+    }
+
+    @Test
+    fun roundtripWithAllTrailers() {
+        val token = byteArrayOf(0x01, 0x02, 0x03)
+        val key = ByteArray(8) { (it + 1).toByte() }
+        val acc = ByteArray(20) { (0xF0 - it).toByte() }
+        val config = UwbSessionConfig(
+            sessionId = 4242,
+            channel = 9,
+            preambleIndex = 11,
+            uwbAddress = byteArrayOf(0x86.toByte(), 0xE4.toByte()),
+            discoveryToken = token,
+            sessionKey = key,
+            accessoryData = acc,
+        )
+        val restored = UwbSessionConfig.fromByteArray(config.toByteArray())
+        assertNotNull(restored)
+        assertEquals(config, restored)
+        assertTrue(token.contentEquals(restored.discoveryToken!!))
+        assertTrue(key.contentEquals(restored.sessionKey!!))
+        assertTrue(acc.contentEquals(restored.accessoryData!!))
+    }
+
+    @Test
+    fun negativeSessionIdRoundTripsLittleEndian() {
+        // High-bit-set values must survive the little-endian read/write symmetrically.
+        for (sid in intArrayOf(-1, Int.MIN_VALUE, 0x80000000.toInt(), -123456)) {
+            val config = UwbSessionConfig(sid, 9, 10, byteArrayOf(1, 2))
+            val restored = UwbSessionConfig.fromByteArray(config.toByteArray())
+            assertNotNull(restored)
+            assertEquals(sid, restored.sessionId)
+        }
+    }
+
+    @Test
+    fun emptyAccessoryDataParsesAsNull() {
+        // A zero-length trailer is indistinguishable from absent, so it comes back null.
+        val config = UwbSessionConfig(1, 2, 3, byteArrayOf(9), accessoryData = ByteArray(0))
+        val restored = UwbSessionConfig.fromByteArray(config.toByteArray())
+        assertNotNull(restored)
+        assertNull(restored.accessoryData)
+    }
+
+    @Test
+    fun truncatedKeyTrailerParsesConfigWithNullKey() {
+        // Payload declares an 8-byte key trailer but includes no key bytes. Parsing must not crash
+        // or reject the config; the trailer is simply treated as absent.
+        val sid = 5
+        val ch = 9
+        val pre = 10
+        val truncated = byteArrayOf(
+            1, // version
+            sid.toByte(), (sid shr 8).toByte(), (sid shr 16).toByte(), (sid shr 24).toByte(),
+            ch.toByte(), (ch shr 8).toByte(), (ch shr 16).toByte(), (ch shr 24).toByte(),
+            pre.toByte(), (pre shr 8).toByte(), (pre shr 16).toByte(), (pre shr 24).toByte(),
+            0, 0, // addr size = 0
+            0, 0, // token size = 0
+            8, 0, // key size = 8, but no key bytes follow
+        )
+        val restored = UwbSessionConfig.fromByteArray(truncated)
+        assertNotNull(restored)
+        assertEquals(sid, restored.sessionId)
+        assertNull(restored.sessionKey)
+        assertNull(restored.accessoryData)
+    }
 }

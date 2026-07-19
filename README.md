@@ -221,6 +221,50 @@ Add required permissions to `Info.plist`:
 <string>This app uses Bluetooth to advertise UWB capabilities</string>
 ```
 
+### Accessory ranging (opt-in)
+
+Beyond phone-to-phone ranging, the library can range with a UWB **accessory** (a Qorvo/NXP
+board and similar), handled by profiles whose `exchange` is `ExchangeProtocol.AccessoryNotify`.
+The two platforms use different accessory protocols:
+
+- **iOS** uses Apple's **standard** Nearby Interaction Accessory Protocol
+  (`NINearbyAccessoryConfiguration`), which works with stock accessory firmware. It is active
+  whenever an accessory profile is present — no opt-in needed.
+- **Android** uses a **bespoke** protocol (the phone acts as the FiRa controller and exchanges a
+  `UwbSessionConfig` over BLE). It only works against **compatible custom accessory firmware**, so
+  it is **off by default** and must be enabled explicitly.
+
+To enable the Android accessory path, add an accessory profile *and* set
+`enableAndroidAccessoryProtocol = true` on `BleDiscoveryConfig`:
+
+```kotlin
+managerFactory.createBleManager(
+    BleDiscoveryConfig(
+        profiles = listOf(LOCAL_PROFILE, QorvoNearbyProfile), // QorvoNearbyProfile is app-owned
+        enableAndroidAccessoryProtocol = true,                // Android-only opt-in; default false
+    )
+)
+```
+
+When the flag is left `false`, `AccessoryNotify` profiles are ignored for discovery **on Android**
+(a warning is logged), so Android phone-to-phone ranging is unaffected. The flag has no effect on
+iOS — its accessory path is Apple's standard protocol and is always available. See
+`AccessoryProfiles.kt` and `UwbDiscoveryViewModel` in the sample app for a working setup.
+
+**How the Android exchange works (per accessory):**
+
+1. Phone scans, discovers the accessory by its advertised UUID, and connects.
+2. Phone writes an **init** command (`ANDROID_ACCESSORY_INIT_COMMAND`).
+3. Accessory notifies back a `UwbSessionConfig` (its UWB address, etc.).
+4. Phone acts as the FiRa **controller**: it assigns the session ID, static-STS key, channel, and
+   preamble, starts ranging, and writes a **configure-and-start** command
+   (`ANDROID_ACCESSORY_CONFIGURE_AND_START`) with that config back to the accessory.
+5. On stop, the phone sends a **stop** command and disconnects.
+
+The `UwbSessionConfig` wire format is little-endian to match the FiRa/UWB convention, so accessory
+firmware can lay its struct out natively. The accessory firmware itself lives outside this
+repository and must implement the matching protocol.
+
 ---
 
 ## Usage
