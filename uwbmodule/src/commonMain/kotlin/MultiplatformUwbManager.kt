@@ -14,14 +14,15 @@ expect class MultiplatformUwbManager {
     suspend fun initialize()
 
     /**
-     * Get the local UWB session configuration to share with peers via BLE.
+     * Get a UWB session configuration for this connection to a peer.
      * Returns null if [initialize] hasn't completed or UWB is unavailable.
      *
      * On Android: contains local UWB address, proposed session ID, channel, preamble.
      * On iOS: contains serialized NI discovery token.
      */
-    suspend fun getLocalConfig(isAccessory:Boolean): UwbSessionConfig?
+    suspend fun createConnectionConfig(peerId:String, isAccessory:Boolean): UwbSessionConfig?
 
+    suspend fun getConnectionConfig(peerId: String): UwbSessionConfig
     /**
      * Start ranging with a peer using exchanged configurations.
      *

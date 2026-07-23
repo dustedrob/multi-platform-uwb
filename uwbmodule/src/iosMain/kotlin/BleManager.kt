@@ -17,7 +17,7 @@ actual class BleManager(
     private var configExchangedCallback: ((String, UwbSessionConfig) -> Unit)? = null
 
     // GATT server state
-    private var localConfig: UwbSessionConfig? = null
+    //private var localConfig: UwbSessionConfig? = null
     private var readCharacteristic: CBMutableCharacteristic? = null
 
     // Track discovered peripherals for GATT client connections
@@ -50,8 +50,15 @@ actual class BleManager(
     private fun deliverRemoteConfig(peerId: String, bytes: ByteArray?) {
         val remoteConfig = bytes?.let { UwbSessionConfig.fromByteArray(it) }
         if (remoteConfig != null) {
-            NSLog("BleManager: received config from $peerId")
-            configExchangedCallback?.invoke(peerId, remoteConfig)
+            val connectionLocalConfig=MultiPlatformManager.getLocalConfig(peerId,false)
+            val rangingRemoteConfig=if(remoteConfig.isOlder(connectionLocalConfig)){
+                 remoteConfig.copy(scope=connectionLocalConfig.scope)
+            }
+            else {
+                 connectionLocalConfig.copy(remoteConfig.hwAddress)
+            }
+            Log.d(TAG, "received config from $peerId")
+            configExchangedCallback?.invoke(peerId, rangingRemoteConfig)
         } else {
             NSLog("BleManager: failed to parse config from $peerId")
         }
@@ -60,7 +67,7 @@ actual class BleManager(
     /** Deliver an accessory's raw configuration blob (opaque — wrapped, not parsed as our envelope). */
     private fun deliverAccessoryConfig(peerId: String, raw: ByteArray) {
         NSLog("BleManager: received accessory config from $peerId (${raw.size} bytes)")
-        configExchangedCallback?.invoke(peerId, UwbSessionConfig(0, 0, 0, 0, ByteArray(0), accessoryData = raw))
+        configExchangedCallback?.invoke(peerId, UwbSessionConfig(0,0,0, 0, 0, 0, ByteArray(0), accessoryData = raw))
     }
 
     /** Find a characteristic on a discovered service by UUID string (CBUUID normalizes short/long). */
@@ -70,7 +77,7 @@ actual class BleManager(
         return service.characteristics?.firstOrNull { (it as? CBCharacteristic)?.UUID == target } as? CBCharacteristic
     }
 
-    private fun addGattService(entry: UwbProfile) {
+    private fun addGattService(entry: profile) {
         // Read-only; server-side accessory tx-notify is out of scope (we only host phone-to-phone).
         val readChar = CBMutableCharacteristic(
             type = CBUUID.UUIDWithString(entry.readFromUuid!!),
@@ -351,8 +358,14 @@ actual class BleManager(
             val isReadChar = serverProfiles().any {
                 didReceiveReadRequest.characteristic.UUID == CBUUID.UUIDWithString(it.readFromUuid!!)
             }
-            if (isReadChar) {
-                val configBytes = localConfig?.toByteArray() ?: ByteArray(0)
+            if (isReadChar) {                
+                var connectionConfig=MultiPlatformManager.getLocalConfig(device.address)
+                connectionLocalConfig = if(connectionLocalConfig==null){
+                           MultiPlatformManager.createLocalConfig(device.address,false)
+                   } else {
+                           connectionLocalConfig
+                   }
+                val configBytes = connectionLocalConfig?.toByteArray() ?: ByteArray(0)
                 val offset = didReceiveReadRequest.offset.toInt()
                 if (offset < configBytes.size) {
                     val responseBytes = configBytes.copyOfRange(offset, configBytes.size)
@@ -455,8 +468,7 @@ actual class BleManager(
 
     // ---- Public API: GATT Server ----
 
-    actual fun startGattServer(localConfig: UwbSessionConfig) {
-        this.localConfig = localConfig
+    actual fun startGattServer() {
 
         if (peripheralManager == null) {
             peripheralManager = CBPeripheralManager(peripheralManagerDelegate, null)

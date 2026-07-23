@@ -108,7 +108,7 @@ class DeviceDiscoveryManager(
     }
 
     /** Get the local UWB config (address, session ID, channel) for display. */
-    suspend fun getLocalConfig(): UwbSessionConfig? = multiplatformUwbManager.getLocalConfig(false)
+    //suspend fun getLocalConfig(): UwbSessionConfig? = multiplatformUwbManager.getLocalConfig(false)
 
     suspend fun startScanning() {
         if (isScanning) return
@@ -118,10 +118,10 @@ class DeviceDiscoveryManager(
         multiplatformUwbManager.initialize()
 
         // Start GATT server so peers can exchange configs with us
-        val localConfig = multiplatformUwbManager.getLocalConfig(false)
-        if (localConfig != null) {
-            bleManager.startGattServer(localConfig)
-        }
+        //val localConfig = multiplatformUwbManager.getLocalConfig(false)
+        //if (localConfig != null) {
+            bleManager.startGattServer()// localConfig)
+        //}
 
         // Start BLE scanning and advertising
         bleManager.startScanning()
@@ -218,12 +218,12 @@ class DeviceDiscoveryManager(
 
         // Initiate config exchange if not already done/pending
         if (id !in exchangedPeers && id !in pendingExchanges) {
-            val localConfig = multiplatformUwbManager.getLocalConfig(false)
-            if (localConfig != null) {
-                pendingExchanges.add(id)
+            //val localConfig = multiplatformUwbManager.getLocalConfig(false)
+            //if (localConfig != null) {
+            //    pendingExchanges.add(id)
                 emitEvent(EventType.ConfigExchangeStarted, id, "Starting GATT config exchange")
                 updateDeviceStateLocked(id, DeviceState.ExchangingConfig)
-                bleManager.connectAndExchangeConfig(id, localConfig)
+            //    bleManager.connectAndExchangeConfig(id, localConfig)
             }
         }
     }

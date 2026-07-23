@@ -3,11 +3,13 @@ package com.dustedrob.uwb
 /**
  * Platform-agnostic UWB session configuration exchanged between peers via BLE GATT.
  *
- * On Android: contains UWB address, session ID, channel, and preamble index.
+ * On Android: contains creation timestamp, UWB address, session ID, channel, and preamble index.
  * On iOS: contains the NearbyInteraction discovery token (serialized).
  */
 data class UwbSessionConfig(
-    val scope: Any,
+    // timestamp of creation
+    val timestamp: ULong, 
+    val scope: Any,  // what scope or NiSession to use to native range on this connection
     /** Agreed-upon session identifier. Both peers must use the same value. */
     val sessionId: Int,
     /** UWB channel number (e.g., 9). */
@@ -57,12 +59,23 @@ data class UwbSessionConfig(
         val tokenBytes = discoveryToken ?: ByteArray(0)
         val keyBytes = sessionKey ?: ByteArray(0)
         val accBytes = accessoryData ?: ByteArray(0)
-        val size = 1 + 4 + 4 + 4 + 2 + uwbAddress.size + 2 + tokenBytes.size + 2 + keyBytes.size + 2 + accBytes.size
+        val timestamp = 0
+        val size = 1 +8 + 4 + 4 + 4 + 2 + uwbAddress.size + 2 + tokenBytes.size + 2 + keyBytes.size + 2 + accBytes.size
         val buf = ByteArray(size)
         var pos = 0
 
         // Version
         buf[pos++] = PROTOCOL_VERSION
+
+        // timestamp
+        buf[pos++]=timestamp.toByte()
+        buf[pos++]=(timestamp shr 8).toByte()
+        buf[pos++]=(timestamp shr 16).toByte()
+        buf[pos++]=(timestamp shr 24).toByte()
+        buf[pos++]=(timestamp shr 32).toByte()
+        buf[pos++]=(timestamp shr 40).toByte()
+        buf[pos++]=(timestamp shr 48).toByte()
+        buf[pos++]=(timestamp shr 56).toByte()
 
         // sessionId (LE)
         buf[pos++] = sessionId.toByte()
@@ -125,6 +138,14 @@ data class UwbSessionConfig(
                 thisKey.contentEquals(otherKey) &&
                 thisAcc.contentEquals(otherAcc)
     }
+   
+    fun isOlder(other:UwbSessionConfig): Boolean {
+        if(timestamp<=other.timestamp) {
+           return true
+        }
+        else
+           return false
+        }
 
     override fun hashCode(): Int {
         var result :Int = sessionId!!
@@ -141,12 +162,13 @@ data class UwbSessionConfig(
         private const val PROTOCOL_VERSION: Byte = 1
 
         fun fromByteArray(bytes: ByteArray, accessoryDevice: Boolean= false, accessoryData:ByteArray? = null): UwbSessionConfig? {
-            if (bytes.size < 17) return null // minimum: 1(ver) + 4(sid) + 4(ch) + 4(pre) + 2(addrLen) + 2(tokLen)
+            if (bytes.size < 25) return null // minimum: 1(ver) + 8(ts) + 4(sid) + 4(ch) + 4(pre) + 2(addrLen) + 2(tokLen)
             var pos = 0
 
             val version = bytes[pos++]
             if (version != PROTOCOL_VERSION) return null
 
+	    val timestamp = readULong(bytes,pos); pos+=8
             val sessionId = readInt(bytes, pos); pos += 4
             val channel = readInt(bytes, pos); pos += 4
             val preambleIndex = readInt(bytes, pos); pos += 4
@@ -180,6 +202,7 @@ data class UwbSessionConfig(
 
             val localScope: Any = 0
             return UwbSessionConfig(
+                timestamp = timestamp,
                 scope= localScope,
                 sessionId = sessionId,
                 channel = channel,
@@ -195,9 +218,20 @@ data class UwbSessionConfig(
         // Little-endian readers (least-significant byte first), matching toByteArray.
         private fun readInt(bytes: ByteArray, offset: Int): Int =
             (bytes[offset].toInt() and 0xFF) or
-                    ((bytes[offset + 1].toInt() and 0xFF) shl 8) or
-                    ((bytes[offset + 2].toInt() and 0xFF) shl 16) or
-                    ((bytes[offset + 3].toInt() and 0xFF) shl 24)
+            ((bytes[offset + 1].toInt() and 0xFF) shl 8) or
+            ((bytes[offset + 2].toInt() and 0xFF) shl 16) or
+            ((bytes[offset + 3].toInt() and 0xFF) shl 24)
+
+        private fun readULong(bytes:ByteArray, offset:Int): ULong =
+           //add function like readInt above, 4 more bytes
+            ((bytes[offset].toULong() and 0xFFuL) or
+            ((bytes[offset + 1].toULong() and 0xFFuL) shl 8) or
+            ((bytes[offset + 2].toULong() and 0xFFuL) shl 16) or
+            ((bytes[offset + 3].toULong() and 0xFFuL) shl 24) or
+            ((bytes[offset + 4].toULong() and 0xFFuL) shl 32) or
+            ((bytes[offset + 5].toULong() and 0xFFuL) shl 40) or
+            ((bytes[offset + 6].toULong() and 0xFFuL) shl 48) or
+            ((bytes[offset + 7].toULong() and 0xFFuL) shl 56)) 
 
         private fun readShort(bytes: ByteArray, offset: Int): Int =
             (bytes[offset].toInt() and 0xFF) or

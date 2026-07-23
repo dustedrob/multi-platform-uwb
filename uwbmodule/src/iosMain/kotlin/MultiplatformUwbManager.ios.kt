@@ -51,6 +51,8 @@ actual class MultiplatformUwbManager {
 
     private val activeSessions = mutableMapOf<String, UwbSessionConfig>()
 
+    private val connectionConfigs = mutableMapOf<String, UwbSessionConfig>()   
+ 
     private val activeDelegates = mutableMapOf<NISession, SessionDelegate>()
 
     /** Our local discovery token, available after session creation. */
@@ -59,9 +61,6 @@ actual class MultiplatformUwbManager {
     /** Strong reference to delegate to prevent GC. */
     private var sessionDelegate: SessionDelegate? = null
 
-    /*actual suspend fun initialize(){
-
-    }*/
      actual suspend fun initialize() {
         if (!NISession.isSupported()) {
             errorCallback?.invoke("NearbyInteraction not supported on this device")
@@ -69,7 +68,7 @@ actual class MultiplatformUwbManager {
         }
     }
 
-    actual suspend fun getLocalConfig(isAccessory:Boolean): UwbSessionConfig? {
+    actual suspend fun createLocalConfig(peerId:String, isAccessory:Boolean): UwbSessionConfig? {
 
         val session = NISession();
         val delegate = SessionDelegate()
@@ -105,7 +104,8 @@ actual class MultiplatformUwbManager {
 
         val tokenBytes = tokenData.toByteArray()
 
-        return UwbSessionConfig(
+        connectionConfigs[peerId]= UwbSessionConfig(
+            timestamp = TimeUtils.getMilliseconds(),
             scope = session,
             sessionId = 0, // Not used on iOS
             channel = 0,
@@ -113,14 +113,15 @@ actual class MultiplatformUwbManager {
             uwbAddress = ByteArray(0), // Not used on iOS
             discoveryToken = tokenBytes,
         )
+        return connectioConfigs[peerId]
     }
 
+    actual fun getLocalConfig(peerid:String): UwbSessionConfig {
+        return connectionConfigs[peerId]
+    }
+    
     actual suspend fun startRanging(peerId: String, remoteConfig: UwbSessionConfig) {
 
-        val sessionConfig = getLocalConfig(remoteConfig.isAccessoryDevice)
-        // Accessory ranging: build an accessory configuration from the accessory's data blob. NI then
-        // generates shareable configuration data (see didGenerateShareableConfigurationData), which we
-        // write back to the accessory over BLE to actually start ranging.
         val accessoryData = remoteConfig.accessoryData
         if (accessoryData != null) {
             val config = try {
@@ -140,7 +141,6 @@ actual class MultiplatformUwbManager {
                 }
             }
             activeSessions[peerId]= sessionConfig as UwbSessionConfig
-            //accessoryPeerId = peerId
             NSLog("UwbManager: Starting accessory ranging with $peerId")
             (sessionConfig.scope as NISession).runWithConfiguration(config)
             return
@@ -185,6 +185,7 @@ actual class MultiplatformUwbManager {
             ((activeSessions[peerId]?.scope) as NISession).pause()
             activeDelegates.remove((activeSessions[peerId]?.scope) as NISession)
             activeSessions.remove(peerId)
+            connectioConfigs.remove(peerid)
             NSLog("UwbManager: Paused session (no active peers)")
         }
     }
@@ -204,6 +205,7 @@ actual class MultiplatformUwbManager {
     actual suspend fun cleanup() {
         activePeers.clear()
         activeSessions.clear()
+        connectioConfigs.clear()
         NSLog("UwbManager: Cleanup completed")
     }
 

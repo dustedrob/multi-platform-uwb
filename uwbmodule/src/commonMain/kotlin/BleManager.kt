@@ -24,10 +24,10 @@ expect class BleManager {
     // ---- GATT-based UWB config exchange ----
 
     /**
-     * Start a GATT server that exposes our local [UwbSessionConfig].
+     * Start a GATT server.
      * Remote peers can read our config and write theirs.
      */
-    fun startGattServer(localConfig: UwbSessionConfig)
+    fun startGattServer()
 
     /** Stop the GATT server. */
     fun stopGattServer()
@@ -37,7 +37,7 @@ expect class BleManager {
      * Reads the peer's config and writes our own.
      * Result delivered via [setConfigExchangedCallback].
      */
-    fun connectAndExchangeConfig(peerId: String, localConfig: UwbSessionConfig)
+    fun connectAndExchangeConfig(peerId: String, connectionConfig:UwbSessionConfig)
 
     /**
      * Register callback invoked when a config exchange completes (on either side).
