@@ -108,7 +108,7 @@ class DeviceDiscoveryManager(
     }
 
     /** Get the local UWB config (address, session ID, channel) for display. */
-    fun getLocalConfig(): UwbSessionConfig? = multiplatformUwbManager.getLocalConfig()
+    //suspend fun getLocalConfig(): UwbSessionConfig? = multiplatformUwbManager.getLocalConfig(false)
 
     suspend fun startScanning() {
         if (isScanning) return
@@ -118,10 +118,7 @@ class DeviceDiscoveryManager(
         multiplatformUwbManager.initialize()
 
         // Start GATT server so peers can exchange configs with us
-        val localConfig = multiplatformUwbManager.getLocalConfig()
-        if (localConfig != null) {
-            bleManager.startGattServer(localConfig)
-        }
+        bleManager.startGattServer()
 
         // Start BLE scanning and advertising
         bleManager.startScanning()
@@ -136,7 +133,7 @@ class DeviceDiscoveryManager(
         }
     }
 
-    fun stopScanning() {
+    suspend fun stopScanning() {
         if (!isScanning) return
         isScanning = false
 
@@ -169,7 +166,7 @@ class DeviceDiscoveryManager(
      * Clean up all resources, including UWB manager and BLE manager.
      * Should be called when the manager is no longer needed (e.g., in ViewModel.onCleared).
      */
-    fun cleanup() {
+    suspend fun cleanup() {
         stopScanning()
         multiplatformUwbManager.cleanup()
         bleManager.cleanup()
@@ -218,12 +215,12 @@ class DeviceDiscoveryManager(
 
         // Initiate config exchange if not already done/pending
         if (id !in exchangedPeers && id !in pendingExchanges) {
-            val localConfig = multiplatformUwbManager.getLocalConfig()
-            if (localConfig != null) {
+            val connectionConfig = multiplatformUwbManager.getConnectionConfig(id)
+            if (connectionConfig != null) {
                 pendingExchanges.add(id)
                 emitEvent(EventType.ConfigExchangeStarted, id, "Starting GATT config exchange")
                 updateDeviceStateLocked(id, DeviceState.ExchangingConfig)
-                bleManager.connectAndExchangeConfig(id, localConfig)
+                bleManager.connectAndExchangeConfig(id, connectionConfig)
             }
         }
     }
@@ -232,8 +229,7 @@ class DeviceDiscoveryManager(
      * Called when BLE GATT config exchange completes with a peer.
      * Starts UWB ranging with the exchanged config.
      */
-    internal suspend fun onConfigExchanged(peerId: String, remoteConfig: UwbSessionConfig) {
-        mutex.withLock {
+    internal suspend fun onConfigExchanged(peerId: String, remoteConfig: UwbSessionConfig) = mutex.withLock {
             // Guard against duplicate callbacks (both GATT client read and server write fire this)
             if (peerId in exchangedPeers) return
             pendingExchanges.remove(peerId)
@@ -267,7 +263,7 @@ class DeviceDiscoveryManager(
             _nearbyDevices.value = existingDevices
 
             emitEvent(EventType.RangingStarted, peerId, "UWB ranging started")
-        }
+        
 
         // Start UWB ranging outside the lock (startRanging may take time)
         multiplatformUwbManager.startRanging(peerId, remoteConfig)

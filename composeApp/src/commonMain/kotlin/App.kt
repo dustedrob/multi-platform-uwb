@@ -416,6 +416,8 @@ private fun LocalDeviceInfoPreview() {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         LocalDeviceInfo(
             config = UwbSessionConfig(
+                timestamp = 0UL,
+                scope = 0,
                 sessionId = 42,
                 channel = 9,
                 preambleIndex = 10,

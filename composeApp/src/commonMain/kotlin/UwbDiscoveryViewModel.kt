@@ -85,7 +85,7 @@ class UwbDiscoveryViewModel(
                 if (checkAndRequestPermissions()) {
                     startUwbScanning()
                     _isScanning.value = true
-                    _localConfig.value = deviceDiscoveryManager.getLocalConfig()
+                    _localConfig.value = deviceDiscoveryManager.getConnectionConfig()
                 }
             } else {
                 stopUwbScanning()
@@ -128,6 +128,6 @@ class UwbDiscoveryViewModel(
 
     override fun onCleared() {
         super.onCleared()
-        deviceDiscoveryManager.cleanup()
+        //deviceDiscoveryManager.cleanup()
     }
 }
