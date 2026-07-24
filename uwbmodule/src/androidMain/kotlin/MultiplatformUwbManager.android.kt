@@ -129,7 +129,7 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
         } else {
              null
         }
-	}
+    }
 
     actual suspend fun startRanging(peerId: String, remoteConfig: UwbSessionConfig) {
 
