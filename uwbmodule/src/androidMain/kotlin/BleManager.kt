@@ -71,6 +71,8 @@ actual class BleManager(
     )
     private val accessoryConnections = mutableMapOf<String, AccessoryConnection>()
 
+    //private val  multiplatformUwbManager = MultiplatformUwbManager();
+
     /** Profiles we host on the local GATT server — only phone-to-phone (read/write) ones. */
     private fun serverProfiles(): List<UwbProfile> =
         config.profiles.filter { it.exchange == ExchangeProtocol.ReadWrite && it.readFromUuid != null }
@@ -79,7 +81,7 @@ actual class BleManager(
     private fun deliverRemoteConfig(peerId: String, bytes: ByteArray?) {
         val remoteConfig = bytes?.let { UwbSessionConfig.fromByteArray(it) }
         if (remoteConfig != null) {
-            val connectionLocalConfig=MultiPlatformManager.getLocalConfig(peerId)
+            val connectionLocalConfig=MultiplatformUwbManager.getLocalConfig(peerId)
             val rangingRemoteConfig=if(remoteConfig.isOlder(connectionLocalConfig)){
                  remoteConfig.copy(scope=connectionLocalConfig.scope)
             }
@@ -105,7 +107,7 @@ actual class BleManager(
             }
             // accessory has decided on anything except its hwAddress, so use the local scope.... to run the session
             // this is cause the local uwbSessionConfig to be sent to the accessory which has all the same data except OUR hwAddress
-            val rangingRemoteConfig= MultiPlatformManager.getLocalConfig[peerI].copy(remoteConfig.hwAddress)
+            val rangingRemoteConfig= MultiplatformUwbManager.getLocalConfig[peerId].copy(remoteConfig.hwAddress)
             configExchangedCallback?.invoke(peerId, rangingRemoteConfig) // this starts ranging
         } else {
             Log.e(TAG, "failed to parse config from $peerId")
@@ -197,9 +199,9 @@ actual class BleManager(
                 it.readFromUuid.equals(characteristic.uuid.toString(), ignoreCase = true)
             }
             if (isReadChar) {
-                var connectionConfig=MultiPlatformManager.getLocalConfig(device.address)
+                var connectionConfig=MultiplatformUwbManager.getLocalConfig(device.address)
                 connectionLocalConfig = if(connectionLocalConfig==null){
-                           MultiPlatformManager.createLocalConfig(device.address,false)
+                           MultiplatformUwbManager.createLocalConfig(device.address,false)
                    } else {
                            connectionLocalConfig
                    }

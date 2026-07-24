@@ -50,7 +50,7 @@ actual class BleManager(
     private fun deliverRemoteConfig(peerId: String, bytes: ByteArray?) {
         val remoteConfig = bytes?.let { UwbSessionConfig.fromByteArray(it) }
         if (remoteConfig != null) {
-            val connectionLocalConfig=MultiPlatformManager.getLocalConfig(peerId,false)
+            val connectionLocalConfig=MultiplatformUwbManager.getLocalConfig(peerId,false)
             val rangingRemoteConfig=if(remoteConfig.isOlder(connectionLocalConfig)){
                  remoteConfig.copy(scope=connectionLocalConfig.scope)
             }
@@ -359,9 +359,9 @@ actual class BleManager(
                 didReceiveReadRequest.characteristic.UUID == CBUUID.UUIDWithString(it.readFromUuid!!)
             }
             if (isReadChar) {                
-                var connectionConfig=MultiPlatformManager.getLocalConfig(device.address)
+                var connectionConfig=MultiplatformUwbManager.getLocalConfig(device.address)
                 connectionLocalConfig = if(connectionLocalConfig==null){
-                           MultiPlatformManager.createLocalConfig(device.address,false)
+                           MultiplatformUwbManager.createLocalConfig(device.address,false)
                    } else {
                            connectionLocalConfig
                    }

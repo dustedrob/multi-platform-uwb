@@ -85,7 +85,7 @@ class UwbDiscoveryViewModel(
                 if (checkAndRequestPermissions()) {
                     startUwbScanning()
                     _isScanning.value = true
-                    _localConfig.value = deviceDiscoveryManager.getLocalConfig()
+                    _localConfig.value = deviceDiscoveryManager.getConnectionConfig()
                 }
             } else {
                 stopUwbScanning()
