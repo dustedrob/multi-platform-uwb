@@ -76,6 +76,18 @@ class DeviceDiscoveryManager(
     /** Accessory peers — these stay BLE-connected during ranging and need a stop handshake. */
     private val accessoryPeers = mutableSetOf<String>()
 
+    /**
+     * Maps a peer's stable UWB address (hex) to the peerId currently ranging with it.
+     *
+     * On Android a single phone appears under several randomized BLE addresses because it both scans
+     * and runs a GATT server, so the same physical device arrives under different peerIds. The UWB
+     * address inside the exchanged config is the stable identity, so we key on it and let the newest
+     * connection win — a fresh peerId for a known UWB address supersedes the stale one, keeping one
+     * device entry and one ranging session. Unused on iOS, where the CoreBluetooth UUID is already
+     * stable and the config carries no UWB address.
+     */
+    private val uwbKeyToPeer = mutableMapOf<String, String>()
+
     companion object {
         /** Devices not seen within this window are considered stale and removed. */
         private const val STALE_THRESHOLD_MS = 10_000L
@@ -164,6 +176,7 @@ class DeviceDiscoveryManager(
         exchangedPeers.clear()
         pendingExchanges.clear()
         accessoryPeers.clear()
+        uwbKeyToPeer.clear()
     }
 
     /**
@@ -241,6 +254,26 @@ class DeviceDiscoveryManager(
             pendingExchanges.remove(peerId)
             exchangedPeers.add(peerId)
             if (remoteConfig.isAccessoryDevice || remoteConfig.accessoryData!=null) accessoryPeers.add(peerId)
+
+            // Collapse duplicate BLE identities of the same physical device. A phone both scans and
+            // serves under randomized BLE addresses, so the same device arrives under several peerIds;
+            // the UWB address in the exchanged config is the stable identity. If we're already ranging
+            // that UWB address, keep the first session and ignore the duplicate rather than tearing the
+            // live one down (which churned the session and cancelled its coroutine). Skipped on iOS
+            // (empty uwbAddress), where the peerId is already stable.
+            val uwbKey = remoteConfig.uwbAddress.takeIf { it.isNotEmpty() }?.toHexString()
+            if (uwbKey != null) {
+                val prevPeerId = uwbKeyToPeer[uwbKey]
+                if (prevPeerId != null && prevPeerId != peerId) {
+                    // Already ranging this device under another BLE identity. Keep the live session and
+                    // drop this identity's placeholder entry so the UI shows one device, not two.
+                    // peerId stays in exchangedPeers so we don't re-exchange with the duplicate.
+                    _nearbyDevices.value = _nearbyDevices.value.filterNot { it.id == peerId }
+                    emitEvent(EventType.DeviceDiscovered, peerId, "Ignored duplicate identity of $prevPeerId (UWB $uwbKey)")
+                    return
+                }
+                uwbKeyToPeer[uwbKey] = peerId
+            }
 
             emitEvent(
                 EventType.ConfigExchangeComplete, peerId,

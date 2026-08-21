@@ -106,4 +106,73 @@ class DeviceDiscoveryManagerTest {
         assertTrue("d1" in exchangedPeers)
         assertTrue("d1" !in pendingExchanges)
     }
+
+    // -- Peer-identity dedup by UWB address (mirrors onConfigExchanged's newest-wins logic) --
+
+    @Test
+    fun sameUwbAddressUnderTwoBleIdsCollapsesToOne() {
+        // A phone that both scans and serves shows up under two randomized BLE ids but reports the
+        // same UWB address; the first live session is kept and the later duplicate is ignored (no
+        // teardown of the running session).
+        val uwbKeyToPeer = mutableMapOf<String, String>()
+        val devices = mutableListOf(
+            NearbyDevice("58:CD:3D:CF:63:7F", "UWB Device"),
+            NearbyDevice("43:E3:E1:1B:D4:97", "UWB Device"),
+        )
+        val ignored = mutableListOf<String>()
+
+        fun onConfigExchanged(peerId: String, uwbKey: String?) {
+            if (uwbKey != null) {
+                val prev = uwbKeyToPeer[uwbKey]
+                if (prev != null && prev != peerId) {
+                    ignored.add(peerId)
+                    devices.removeAll { it.id == peerId }
+                    return
+                }
+                uwbKeyToPeer[uwbKey] = peerId
+            }
+        }
+
+        onConfigExchanged("58:CD:3D:CF:63:7F", "094d") // seen via our GATT server (kept)
+        onConfigExchanged("43:E3:E1:1B:D4:97", "094d") // same phone, seen via our scan (ignored)
+
+        assertEquals(1, devices.size)
+        assertEquals("58:CD:3D:CF:63:7F", devices[0].id)
+        assertEquals(listOf("43:E3:E1:1B:D4:97"), ignored)
+    }
+
+    @Test
+    fun distinctUwbAddressesAreKeptSeparate() {
+        // Two real peers (or two accessories) with different UWB addresses must not be merged.
+        val uwbKeyToPeer = mutableMapOf<String, String>()
+        val devices = mutableListOf<NearbyDevice>()
+
+        fun onConfigExchanged(peerId: String, uwbKey: String?) {
+            if (uwbKey != null) uwbKeyToPeer[uwbKey] = peerId
+            if (devices.none { it.id == peerId }) devices.add(NearbyDevice(peerId, "UWB Device"))
+        }
+
+        onConfigExchanged("p1", "094d")
+        onConfigExchanged("p2", "0588")
+
+        assertEquals(2, devices.size)
+    }
+
+    @Test
+    fun emptyUwbAddressSkipsDedup() {
+        // iOS configs carry no UWB address (null key), so identity dedup is bypassed entirely.
+        val uwbKeyToPeer = mutableMapOf<String, String>()
+        val devices = mutableListOf<NearbyDevice>()
+
+        fun onConfigExchanged(peerId: String, uwbKey: String?) {
+            if (uwbKey != null) uwbKeyToPeer[uwbKey] = peerId
+            if (devices.none { it.id == peerId }) devices.add(NearbyDevice(peerId, "UWB Device"))
+        }
+
+        onConfigExchanged("uuid-A", null)
+        onConfigExchanged("uuid-B", null)
+
+        assertEquals(2, devices.size)
+        assertTrue(uwbKeyToPeer.isEmpty())
+    }
 }

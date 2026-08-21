@@ -67,6 +67,10 @@ actual class MultiplatformUwbManager {
     }
 
     actual fun createConnectionConfig(peerId:String, isAccessory:Boolean): UwbSessionConfig? {
+        // One session per peer: discovery and the incoming connection use the same CoreBluetooth UUID,
+        // so a second call must reuse the existing session rather than overlay a fresh NISession (which
+        // would strand the first and its already-shared discovery token).
+        connectionConfigs[peerId]?.let { return it }
 
         val session = NISession()
         peerSessions[peerId] = session

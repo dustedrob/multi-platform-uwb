@@ -82,13 +82,11 @@ actual class BleManager(
         if (remoteConfig != null) {
             val connectionLocalConfig=uwbManager.getConnectionConfig(peerId)
             if(connectionLocalConfig != null) {
-                val rangingRemoteConfig = if (remoteConfig.isOlder(connectionLocalConfig)) {
-                    remoteConfig
-                } else {
-                    connectionLocalConfig.copy(uwbAddress = remoteConfig.uwbAddress)
-                }
+                // Pass the peer's config through unchanged. Role election and parameter/address
+                // selection happen in startRanging, which needs the peer's controlee and controller
+                // addresses both intact.
                 Log.d(TAG, "received config from $peerId")
-                rangingRemoteConfig.let { configExchangedCallback?.invoke(peerId, it) }
+                configExchangedCallback?.invoke(peerId, remoteConfig)
             }
         } else {
             Log.e(TAG, "failed to parse config from $peerId")
