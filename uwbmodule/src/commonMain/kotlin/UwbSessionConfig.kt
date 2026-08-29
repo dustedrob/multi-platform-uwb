@@ -50,7 +50,7 @@ data class UwbSessionConfig(
      * peer's controller address, without either side minting a new address after the exchange. Null
      * on iOS and for accessories.
      */
-    val controllerAddress: ByteArray? = null,
+    //val controllerAddress: ByteArray? = null,
 ) {
     /**
      * Serialize to a simple binary format for BLE GATT exchange.
@@ -74,8 +74,8 @@ data class UwbSessionConfig(
         val tokenBytes = discoveryToken ?: ByteArray(0)
         val keyBytes = sessionKey ?: ByteArray(0)
         val accBytes = accessoryData ?: ByteArray(0)
-        val ctrlBytes = controllerAddress ?: ByteArray(0)
-        val size = 1 +8 + 4 + 4 + 4 + 2 + uwbAddress.size + 2 + tokenBytes.size + 2 + keyBytes.size + 2 + accBytes.size + 2 + ctrlBytes.size
+       // val ctrlBytes = controllerAddress ?: ByteArray(0)
+        val size = 1 +8 + 4 + 4 + 4 + 2 + uwbAddress.size + 2 + tokenBytes.size + 2 + keyBytes.size + 2 + accBytes.size + 2 //+ ctrlBytes.size
         val buf = ByteArray(size)
         var pos = 0
 
@@ -135,10 +135,10 @@ data class UwbSessionConfig(
         accBytes.copyInto(buf, pos)
         pos += accBytes.size
 
-        // controllerAddress (optional trailer)
+        /* controllerAddress (optional trailer)
         buf[pos++] = ctrlBytes.size.toByte()
         buf[pos++] = (ctrlBytes.size shr 8).toByte()
-        ctrlBytes.copyInto(buf, pos)
+        ctrlBytes.copyInto(buf, pos) */
 
         return buf
     }
@@ -152,16 +152,16 @@ data class UwbSessionConfig(
         val otherKey = other.sessionKey ?: ByteArray(0)
         val thisAcc = accessoryData ?: ByteArray(0)
         val otherAcc = other.accessoryData ?: ByteArray(0)
-        val thisCtrl = controllerAddress ?: ByteArray(0)
-        val otherCtrl = other.controllerAddress ?: ByteArray(0)
+        //val thisCtrl = controllerAddress ?: ByteArray(0)
+       // val otherCtrl = other.controllerAddress ?: ByteArray(0)
         return sessionId == other.sessionId &&
                 channel == other.channel &&
                 preambleIndex == other.preambleIndex &&
                 uwbAddress.contentEquals(other.uwbAddress) &&
                 thisToken.contentEquals(otherToken) &&
                 thisKey.contentEquals(otherKey) &&
-                thisAcc.contentEquals(otherAcc) &&
-                thisCtrl.contentEquals(otherCtrl)
+                thisAcc.contentEquals(otherAcc) // &&
+                //thisCtrl.contentEquals(otherCtrl)
     }
    
     fun isOlder(other: UwbSessionConfig): Boolean {
@@ -196,7 +196,7 @@ data class UwbSessionConfig(
         result =  31 * result + (discoveryToken?.contentHashCode() ?: 0)
         result =  31 * result + (sessionKey?.contentHashCode() ?: 0)
         result =  31 * result + (accessoryData?.contentHashCode() ?: 0)
-        result =  31 * result + (controllerAddress?.contentHashCode() ?: 0)
+       // result =  31 * result + (controllerAddress?.contentHashCode() ?: 0)
         return result
     }
 
@@ -263,7 +263,7 @@ data class UwbSessionConfig(
                 sessionKey = sessionKey,
                 accessoryData = accessoryData,
                 isAccessoryDevice = accessoryDevice,
-                controllerAddress = controllerAddress,
+                //controllerAddress = controllerAddress,
             )
         }
 
