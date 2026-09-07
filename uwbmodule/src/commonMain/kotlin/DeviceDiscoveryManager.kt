@@ -25,7 +25,8 @@ enum class EventType {
     ConfigExchangeComplete,
     RangingStarted,
     RangingUpdate,
-    Error
+    Error,
+    StatusUpdate
 }
 
 /**
