@@ -203,6 +203,23 @@ data class UwbSessionConfig(
     companion object {
         private const val PROTOCOL_VERSION: Byte = 1
 
+        /**
+         * Session id for one controller/controlee pair.
+         *
+         * With one session per peer, the id has to be unique per pair on this device and identical on
+         * both ends. Both ends know both addresses after the config exchange (the controller its own
+         * controller address and the peer's [uwbAddress]; the controlee the peer's [controllerAddress]
+         * and its own [uwbAddress]), so folding the pair in a fixed order gives the same id on each
+         * side without another round trip. Never 0, which the stack treats as "derive it yourself".
+         */
+        fun sessionIdFor(controllerAddress: ByteArray, controleeAddress: ByteArray): Int {
+            var h = 17
+            for (b in controllerAddress) h = h * 31 + (b.toInt() and 0xFF)
+            h = h * 31 + 0x5A
+            for (b in controleeAddress) h = h * 31 + (b.toInt() and 0xFF)
+            return if (h == 0) 1 else h
+        }
+
         fun fromByteArray(
             bytes: ByteArray,
             accessoryDevice: Boolean = false

@@ -1,9 +1,20 @@
-package com.dustedrob.uwb
+
+@file:JvmName("TimeoutHandler")package com.dustedrob.uwb
+
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlin.jvm.JvmName
+import kotlin.time.Duration.Companion.milliseconds
 
 /**
  * Platform BLE manager handling device discovery via scanning/advertising
  * and UWB session configuration exchange via GATT.
  */
+
 expect class BleManager {
 
     /** Start scanning for nearby UWB-capable devices. */
@@ -37,7 +48,7 @@ expect class BleManager {
      * Reads the peer's config and writes our own.
      * Result delivered via [setConfigExchangedCallback].
      */
-    fun connectAndExchangeConfig(peerId: String, connectionConfig:UwbSessionConfig)
+    fun connectAndExchangeConfig(peerId: String, connectionConfig: UwbSessionConfig)
 
     /**
      * Register callback invoked when a config exchange completes (on either side).
@@ -56,3 +67,31 @@ expect class BleManager {
     /** Clean up BLE resources. Call when done using the manager. */
     fun cleanup()
 }
+    val BleManager.ScanTime: Long
+        get() = 5000
+
+fun BleManager.setTimeout(delayMillis: Long, block: () -> Unit): Job {
+        return CoroutineScope(Dispatchers.Main + SupervisorJob()).launch {
+            delay(delayMillis.milliseconds)
+            block()
+        }
+    }
+
+
+    fun BleManager.createUUIDFilter(patternMask: String): Regex {
+
+        val cleanedMask = patternMask// .replace("-", "").trim()
+        val regexPattern = buildString {
+            append("^")
+            for (char in cleanedMask) {
+                when (char) {
+                    '.' -> append("[0-9a-fA-F]")  // Any valid hex character
+                    '#' -> append("[0-9]") // Any decimal digit (0-9)
+                    else -> append(char.toString()) // Strict character literal match
+                }
+            }
+            append("$")
+
+        }
+        return Regex(regexPattern, RegexOption.IGNORE_CASE)
+    }

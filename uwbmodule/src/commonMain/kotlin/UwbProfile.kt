@@ -32,6 +32,7 @@ interface UwbProfile {
      */
     val advertisedUuid: String get() = discoveryServiceUuid
 
+    val advertisedUUIDMask: String get() = "*"
     /**
      * Characteristic the client reads to obtain the peer's config (the peer's "tx").
      * Used by [ExchangeProtocol.ReadWrite]; null for accessory profiles.

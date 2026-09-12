@@ -17,6 +17,7 @@ import platform.NearbyInteraction.NIAlgorithmConvergenceStatusReasonInsufficient
 import platform.NearbyInteraction.NIAlgorithmConvergenceStatusReasonInsufficientLighting
 import platform.NearbyInteraction.NIAlgorithmConvergenceStatusReasonInsufficientMovement
 import platform.NearbyInteraction.NIAlgorithmConvergenceStatusReasonInsufficientVerticalSweep
+import platform.NearbyInteraction.NIConfiguration
 import platform.NearbyInteraction.NIDiscoveryToken
 import platform.NearbyInteraction.NINearbyAccessoryConfiguration
 import platform.NearbyInteraction.NINearbyObject
@@ -32,7 +33,7 @@ import platform.darwin.dispatch_get_main_queue
 actual class MultiplatformUwbManager {
 
     private var rangingCallback: ((String, Double, Double?, Double?) -> Unit)? = null
-    private var errorCallback: ((String) -> Unit)? = null
+    private var errorCallback: ((String?, String) -> Unit)? = null
 
     /** Outbound channel to write data back to a peer over BLE (wired to BleManager.sendToPeer). */
     private var sendToPeerCallback: ((String, ByteArray) -> Unit)? = null
@@ -59,9 +60,18 @@ actual class MultiplatformUwbManager {
     /** Strong reference to each session's delegate; NISession.delegate is weak. */
     private val activeDelegates = mutableMapOf<NISession, SessionDelegate>()
 
+    /**
+     * The configuration each peer's session is running, so a suspended session can be re-run when
+     * the suspension ends (NI requires `runWithConfiguration` again; it does not resume by itself).
+     */
+    private val peerConfigs = mutableMapOf<String, NIConfiguration>()
+
+    private fun peerIdFor(session: NISession): String =
+        peerSessions.entries.firstOrNull { it.value == session }?.key ?: "unknown"
+
      actual suspend fun initialize() {
         if (!NISession.isSupported()) {
-            errorCallback?.invoke("NearbyInteraction not supported on this device")
+            errorCallback?.invoke(null, "NearbyInteraction not supported on this device")
             return
         }
     }
@@ -131,7 +141,7 @@ actual class MultiplatformUwbManager {
             val config = try {
                 NINearbyAccessoryConfiguration(accessoryData.toNSData(), null)
             } catch (e: Exception) {
-                errorCallback?.invoke("Failed to build accessory configuration for $peerId: ${e.message}")
+                errorCallback?.invoke(peerId, "Failed to build accessory configuration for $peerId: ${e.message}")
                 return
             }
             // check for camera assistance in later iOS systems
@@ -149,20 +159,21 @@ actual class MultiplatformUwbManager {
             NSLog("UwbManager: Starting accessory ranging with $peerId ")
             val session = peerSessions[peerId]
             if (session == null) {
-                errorCallback?.invoke("No NISession for $peerId; createConnectionConfig must run first")
+                errorCallback?.invoke(peerId, "No NISession for $peerId; createConnectionConfig must run first")
                 return
             }
             accessoryPeers.add(peerId)
             // NISession.delegate is weak, so hold each session's delegate strongly per session.
             val delegate = activeDelegates[session] ?: SessionDelegate().also { activeDelegates[session] = it }
             session.delegate = delegate
+            peerConfigs[peerId] = config
             session.runWithConfiguration(config)
             return
         }
 
         val tokenBytes = remoteConfig.discoveryToken
         if (tokenBytes == null || tokenBytes.isEmpty()) {
-            errorCallback?.invoke("No discovery token in remote config for $peerId")
+            errorCallback?.invoke(peerId, "No discovery token in remote config for $peerId")
             return
         }
 
@@ -175,12 +186,12 @@ actual class MultiplatformUwbManager {
                 error = null
             ) as? NIDiscoveryToken
         } catch (e: Exception) {
-            errorCallback?.invoke("Failed to deserialize peer token for $peerId: ${e.message}")
+            errorCallback?.invoke(peerId, "Failed to deserialize peer token for $peerId: ${e.message}")
             return
         }
 
         if (peerToken == null) {
-            errorCallback?.invoke("Failed to deserialize discovery token for $peerId")
+            errorCallback?.invoke(peerId, "Failed to deserialize discovery token for $peerId")
             return
         }
 
@@ -201,25 +212,33 @@ actual class MultiplatformUwbManager {
         NSLog("UwbManager: Starting ranging with $peerId")
         val session = peerSessions[peerId]
         if (session == null) {
-            errorCallback?.invoke("No NISession for $peerId; createConnectionConfig must run first")
+            errorCallback?.invoke(peerId, "No NISession for $peerId; createConnectionConfig must run first")
             return
         }
         // NISession.delegate is weak, so hold each session's delegate strongly per session.
         val delegate = activeDelegates[session] ?: SessionDelegate().also { activeDelegates[session] = it }
         session.delegate = delegate
+        peerConfigs[peerId] = config
         session.runWithConfiguration(config)
     }
 
     actual suspend fun stopRanging(peerId: String) {
+        val session = peerSessions[peerId]
+        session?.pause()
+        forgetPeer(peerId)
+        NSLog("UwbManager: Paused session for $peerId")
+    }
+
+    /**
+     * Drop every per-peer entry for one peer, leaving the other sessions untouched. The config goes
+     * too, so a re-discovery mints a fresh session and token instead of reusing a dead one.
+     */
+    private fun forgetPeer(peerId: String) {
         activePeers.remove(peerId)
         accessoryPeers.remove(peerId)
-        val session = peerSessions.remove(peerId)
-        if (session != null) {
-            session.pause()
-            activeDelegates.remove(session)
-        }
+        peerConfigs.remove(peerId)
+        peerSessions.remove(peerId)?.let { activeDelegates.remove(it) }
         connectionConfigs.remove(peerId)
-        NSLog("UwbManager: Paused session for $peerId")
     }
 
     actual fun setRangingCallback(callback: (peerId: String, distance: Double, azimuth: Double?, elevation: Double?) -> Unit) {
@@ -230,7 +249,7 @@ actual class MultiplatformUwbManager {
         sendToPeerCallback = callback
     }
 
-    actual fun setErrorCallback(callback: (error: String) -> Unit) {
+    actual fun setErrorCallback(callback: (peerId: String?, error: String) -> Unit) {
         errorCallback = callback
     }
 
@@ -240,6 +259,7 @@ actual class MultiplatformUwbManager {
         peerSessions.clear()
         accessoryPeers.clear()
         activeDelegates.clear()
+        peerConfigs.clear()
         connectionConfigs.clear()
         NSLog("UwbManager: Cleanup completed")
     }
@@ -250,20 +270,13 @@ actual class MultiplatformUwbManager {
 
         override fun session(session: NISession, didUpdateNearbyObjects: List<*>) {
             dispatchToMain {
-                // Accessory objects aren't in activePeers (keyed by peer tokens), so fall
-                // back to the tracked accessory peer.
-                val peerId:String = peerSessions.entries
-                    .firstOrNull { it.value == session }?.key ?: "unknown"
+                // Sessions are per peer, so the session identity is the peer identity (accessory
+                // objects aren't in activePeers, which is keyed by peer tokens).
+                val peerId = peerIdFor(session)
                 didUpdateNearbyObjects.forEach { obj ->
-                    NSLog("didUpdate entered for $peerId")
                     if (obj is NINearbyObject) {
                         val distance = obj.distance.toDouble()
                         if (!distance.isNaN()) {
-                            // Accessory objects aren't in activePeers (keyed by peer tokens), so fall
-                            // back to the tracked accessory peer.
-                            val peerId:String = peerSessions.entries
-                                .firstOrNull { it.value == session }?.key ?: "unknown"
-
                             // Azimuth (`horizontalAngle`) is iOS 16+ and is NaN until camera-assistance
                             // convergence, so only emit it when available and valid. NearbyInteraction
                             // reports it in radians; convert to degrees to match the module contract
@@ -280,7 +293,6 @@ actual class MultiplatformUwbManager {
                             // NearbyInteraction exposes no elevation angle — `verticalDirectionEstimate`
                             // is a direction category (above/below/same), not a measurement — so we
                             // leave elevation null on iOS rather than emit a meaningless value.
-                            NSLog("sending callback info to $peerId")
                             rangingCallback?.invoke(peerId, distance, azimuth, null)
                         }
                     }
@@ -294,14 +306,12 @@ actual class MultiplatformUwbManager {
             withReason: NINearbyObjectRemovalReason
         ) {
             dispatchToMain {
+                val peerId = peerIdFor(session)
                 didRemoveNearbyObjects.forEach { obj ->
                     if (obj is NINearbyObject) {
-                        val peerId:String = peerSessions.entries
-                            .firstOrNull { it.value == session }?.key ?: "unknown"
-                        peerId.let {
-                            activePeers.remove(it)
-                            NSLog("UwbManager: Peer $it removed, reason=$withReason")
-                        }
+                        activePeers.remove(peerId)
+                        NSLog("UwbManager: Peer $peerId removed, reason=$withReason")
+                        errorCallback?.invoke(peerId, "Peer $peerId out of range (reason=$withReason)")
                     }
                 }
             }
@@ -310,12 +320,11 @@ actual class MultiplatformUwbManager {
         override fun session(session: NISession, didInvalidateWithError: NSError) {
             dispatchToMain {
                 val msg = didInvalidateWithError.localizedDescription
-                NSLog("UwbManager: Session invalidated: $msg")
-                errorCallback?.invoke("NI Session error: $msg")
-                activePeers.clear()
-                peerSessions.clear()
-                accessoryPeers.clear()
-                activeDelegates.clear()
+                // Only this peer's session died; the others keep ranging.
+                val peerId = peerIdFor(session)
+                NSLog("UwbManager: Session invalidated for $peerId: $msg")
+                errorCallback?.invoke(peerId, "NI Session error: $msg")
+                forgetPeer(peerId)
             }
         }
 
@@ -327,8 +336,7 @@ actual class MultiplatformUwbManager {
             NSLog("did generate entered")
             // Accessory ranging: NI produced the data the accessory needs to start. Send it back over
             // BLE, prefixed with the configure-and-start message id.
-            val peerId:String = peerSessions.entries
-                .firstOrNull { it.value == session }?.key ?: "unknown"
+            val peerId = peerIdFor(session)
 
             val payload = byteArrayOf(NI_ACCESSORY_CONFIGURE_AND_START) + didGenerateShareableConfigurationData.toByteArray()
             NSLog("UwbManager: sending configure-and-start to $peerId (${payload.size} bytes)")
@@ -374,30 +382,30 @@ actual class MultiplatformUwbManager {
         }
 
         override fun sessionDidStartRunning(session: NISession) {
-            val peerId:String = peerSessions.entries
-                .firstOrNull { it.value == session }?.key ?: "unknown"
-            NSLog("UwbManager: Session started running for ${peerId}")
+            NSLog("UwbManager: Session started running for ${peerIdFor(session)}")
         }
 
         override fun sessionWasSuspended(session: NISession) {
-            val peerId:String = peerSessions.entries
-                .firstOrNull { it.value == session }?.key ?: "unknown"
+            val peerId = peerIdFor(session)
             NSLog("UwbManager: Session suspended for ${peerId}")
-            // Only accessories understand the BLE stop command; phone-to-phone peers don't.
-            if (peerId in accessoryPeers) {
-                sendToPeerCallback?.invoke(peerId, byteArrayOf(NI_ACCESSORY_STOP))
-            }
+            // Suspension is transient (backgrounding, or NI juggling several sessions), so do not
+            // tell an accessory to stop here: that made the suspension permanent, and the accessory
+            // only learns about a real stop from stopRanging. We re-run when the suspension ends.
             dispatchToMain {
-                errorCallback?.invoke("NI Session was suspended for $peerId")
+                errorCallback?.invoke(peerId, "NI Session was suspended for $peerId")
             }
         }
 
         override fun sessionSuspensionEnded(session: NISession) {
-            val peerId:String = peerSessions.entries
-                .firstOrNull { it.value == session }?.key ?: "unknown"
+            val peerId = peerIdFor(session)
             NSLog("UwbManager: Session suspension ended for $peerId")
-            // Re-run with existing config if we have active peers
-            // The session needs to be re-configured after suspension
+            // NI does not resume by itself; the session has to be run with its configuration again.
+            val config = peerConfigs[peerId]
+            if (config != null) {
+                session.runWithConfiguration(config)
+            } else {
+                NSLog("UwbManager: No stored configuration for $peerId; cannot resume")
+            }
         }
     }
 

@@ -47,6 +47,8 @@ actual class BleManager(
     private fun serverProfiles(): List<UwbProfile> =
         config.profiles.filter { it.exchange == ExchangeProtocol.ReadWrite && it.readFromUuid != null }
 
+
+
     /** Deliver a peer's serialized config to the app (single entry point, no duplicate dispatch). */
     private fun deliverRemoteConfig(peerId: String, bytes: ByteArray?) {
         val remoteConfig = bytes?.let { UwbSessionConfig.fromByteArray(it, false) }
@@ -114,6 +116,8 @@ actual class BleManager(
                 if (scanWhenReady) {
                     scanWhenReady = false
                     central.scanForPeripheralsWithServices(scanServiceUuids(), null)
+                    /* stop scanning after a few seconds */
+                    setTimeout(ScanTime, { stopScanning() })
                     NSLog("BleManager: Deferred scan started")
                 }
             } else {
@@ -127,6 +131,7 @@ actual class BleManager(
             advertisementData: Map<Any?, *>,
             RSSI: NSNumber
         ) {
+            NSLog(("did discover uuid=${didDiscoverPeripheral.identifier.UUIDString}"))
             val deviceId = didDiscoverPeripheral.identifier.UUIDString
             if (discoveredPeripherals[deviceId] == null) {
                 val deviceName = didDiscoverPeripheral.name ?: "Unknown Device"
@@ -139,16 +144,33 @@ actual class BleManager(
                 // 16-bit (e.g. FFF0) vs full 128-bit base UUIDs, so no string slicing is needed.
                 config.profiles.forEach { p ->
                     val target = CBUUID.UUIDWithString(p.advertisedUuid)
-                    if (serviceUuids.any { it == target }) {
+                    // if there is a UUID mask specified
+                    if(p.advertisedUUIDMask != "*") {
+                        NSLog("Have UUID filter for profile ${p.name} = ${p.advertisedUUIDMask}")
+                        for( id in serviceUuids) {
+                            NSLog("checking serviceid ${id.UUIDString}")
+                            if (createUUIDFilter(p.advertisedUUIDMask).matches(id.UUIDString)) {
+                                NSLog((" UUID matches filter = ${p.advertisedUUIDMask}"))
+                                // if good
+                                profile = p
+                                break
+                            }
+                        }
+                    } else if (serviceUuids.any { it == target }) {
                         profile = p
                     }
                 }
-
-                // Cache peripheral (must keep strong reference for connection)
-                discoveredPeripherals[deviceId] = AccessoryDevice(didDiscoverPeripheral, profile)
-                uwbManager.createConnectionConfig(deviceId, profile?.exchange == ExchangeProtocol.AccessoryNotify)
-                NSLog("BleManager: Discovered $deviceName ($deviceId) profile=${profile?.name}")
-                deviceDiscoveredCallback?.invoke(deviceId, deviceName)
+                if(profile != null) {
+                    // Cache peripheral (must keep strong reference for connection)
+                    discoveredPeripherals[deviceId] =
+                        AccessoryDevice(didDiscoverPeripheral, profile)
+                    uwbManager.createConnectionConfig(
+                        deviceId,
+                        profile.exchange == ExchangeProtocol.AccessoryNotify
+                    )
+                    NSLog("BleManager: Discovered $deviceName ($deviceId) profile=${profile?.name}")
+                    deviceDiscoveredCallback?.invoke(deviceId, deviceName)
+                }
             }
         }
 
@@ -408,19 +430,30 @@ actual class BleManager(
 
     // iOS uses all profiles: accessory ranging here is Apple's standard NI Accessory Protocol,
     // which is not gated by BleDiscoveryConfig.enableAndroidAccessoryProtocol (that flag is Android-only).
-    private fun scanServiceUuids(): List<CBUUID> =
-        config.profiles.map { CBUUID.UUIDWithString(it.advertisedUuid) }
+    private fun scanServiceUuids(): List<CBUUID>? {
+        var uuidList: List<CBUUID>? = null
+        val hasMask=config.profiles.any {
+            it.advertisedUUIDMask != "*"
+        }
+        if(!hasMask)
+            uuidList=config.profiles.map { CBUUID.UUIDWithString(it.advertisedUuid) }
+        return uuidList
+    }
 
     actual fun startScanning() {
         val central = centralManager ?: CBCentralManager(centralDelegate, null).also {
             centralManager = it
         }
-
+        val hasMask: Boolean = config.profiles.any {
+            it.advertisedUUIDMask!="*"
+        }
         if (central.state == CBManagerStatePoweredOn) {
             val options = mapOf<Any?, Any?>(
-                CBCentralManagerScanOptionAllowDuplicatesKey to NSNumber(false)
+                CBCentralManagerScanOptionAllowDuplicatesKey to NSNumber(true)
             )
             central.scanForPeripheralsWithServices(scanServiceUuids(), options)
+            /* stop scanning after a few seconds */
+            setTimeout(5000, { stopScanning() })
             NSLog("BleManager: Scan started immediately")
         } else {
             scanWhenReady = true
@@ -488,6 +521,7 @@ actual class BleManager(
 
     /** Adds the first hosted profile's service; the rest are chained via the didAddService delegate. */
     private fun addAllGattServices() {
+        NSLog(("Add services"))
         serverProfiles().firstOrNull()?.let { addGattService(it) }
     }
 

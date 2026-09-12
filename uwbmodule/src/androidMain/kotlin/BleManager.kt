@@ -126,23 +126,51 @@ actual class BleManager(
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             val device = result.device
             val deviceAddress = device.address
-            val deviceName = if (hasConnectPermission()) device.name ?: "Unknown Device" else "Unknown Device"
+            val deviceName =
+                if (hasConnectPermission()) device.name ?: "Unknown Device" else "Unknown Device"
             if (discoveredDevices[deviceAddress] != null) return
 
             var profile: UwbProfile? = null
-            result.scanRecord?.serviceUuids?.forEach { uuid ->
-                config.activeProfiles.forEach { p ->
-                    // Android normalizes 16-bit advertisements to the full base UUID, so a plain
-                    // case-insensitive full-string compare matches both short and long forms.
-                    if (profile == null && p.advertisedUuid.equals(uuid.toString(), ignoreCase = true)) {
-                        profile = p
+            // loop thru the service IDs
+            if(result.scanRecord != null &&  result.scanRecord?.serviceUuids !=null) {
+                for (uuid in result.scanRecord?.serviceUuids!!) {
+                    // look in each profile
+                    for (p in config.activeProfiles) {
+                        // if there is a UUID mask specified
+                        if (p.advertisedUUIDMask != "*") {
+                            Log.d(
+                                TAG,
+                                "Have UUID filter for profile ${p.name} = ${p.advertisedUUIDMask}"
+                            )
+                            Log.d(TAG, "checking serviceid ${uuid.toString()}")
+                            if (createUUIDFilter(p.advertisedUUIDMask).matches(uuid.toString())) {
+                                Log.d(TAG, " UUID matches filter = ${p.advertisedUUIDMask}")
+                                // if good
+                                profile = p
+                                break;
+                            }
+                        }
+                        // Android normalizes 16-bit advertisements to the full base UUID, so a plain
+                        // case-insensitive full-string compare matches both short and long forms.
+                        else if (p.advertisedUuid.equals(uuid.toString(), ignoreCase = true)) {
+                            profile = p
+                            break;
+                        }
                     }
+                    if (profile == null)
+                        break
                 }
             }
-            discoveredDevices[deviceAddress] = AccessoryDevice(device, profile)
-            uwbManager.createConnectionConfig(deviceAddress, profile?.exchange == ExchangeProtocol.AccessoryNotify)
-            Log.d(TAG, "Found device: $deviceName ($deviceAddress) profile=${profile?.name}")
-            deviceDiscoveredCallback?.invoke(deviceAddress, deviceName)
+            // if we found a match
+            if(profile != null) {
+                discoveredDevices[deviceAddress] = AccessoryDevice(device, profile)
+                uwbManager.createConnectionConfig(
+                    deviceAddress,
+                    profile?.exchange == ExchangeProtocol.AccessoryNotify
+                )
+                Log.d(TAG, "Found device: $deviceName ($deviceAddress) profile=${profile?.name}")
+                deviceDiscoveredCallback?.invoke(deviceAddress, deviceName)
+            }
         }
 
         override fun onScanFailed(errorCode: Int) {
@@ -294,13 +322,22 @@ actual class BleManager(
                 Log.w(TAG, "Accessory profiles ignored: set BleDiscoveryConfig.enableAndroidAccessoryProtocol to use them")
             }
             val filters: MutableList<ScanFilter> = mutableListOf()
-            config.activeProfiles.forEach { profile ->
-                val scanFilter = ScanFilter.Builder()
-                    .setServiceUuid(ParcelUuid(UUID.fromString(profile.advertisedUuid.uppercase())))
-                    .build()
-                filters.add(scanFilter)
+            val hasMask: Boolean= config.activeProfiles.any{
+                it.advertisedUUIDMask!="*"
+            }
+            if( !hasMask) {
+                config.activeProfiles.forEach { profile ->
+                    val scanFilter = ScanFilter.Builder()
+                        .setServiceUuid(ParcelUuid(UUID.fromString(profile.advertisedUuid.uppercase())))
+                        .build()
+                    filters.add(scanFilter)
+                }
+
             }
             scanner.startScan(filters, scanSettings, scanCallback)
+            if(hasMask)
+                setTimeout(ScanTime, { stopScanning() })
+
             Log.d(TAG, "BLE scanning started")
         } catch (e: Exception) {
             Log.e(TAG, "Error starting BLE scan: ${e.message}")

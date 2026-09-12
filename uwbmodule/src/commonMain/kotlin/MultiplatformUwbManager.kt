@@ -47,8 +47,12 @@ expect class MultiplatformUwbManager {
      */
     fun setSendToPeerCallback(callback: (peerId: String, data: ByteArray) -> Unit)
 
-    /** Register callback for errors. */
-    fun setErrorCallback(callback: (error: String) -> Unit)
+    /**
+     * Register callback for errors. [peerId] names the session the error belongs to, or is null for
+     * device-wide failures (UWB unsupported, initialization), so the orchestrator can mark one peer
+     * as failed instead of treating every error as global.
+     */
+    fun setErrorCallback(callback: (peerId: String?, error: String) -> Unit)
 
     /** Clean up resources and unbind services. Call when done using the manager. */
     suspend fun cleanup()

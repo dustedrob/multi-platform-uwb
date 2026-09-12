@@ -384,4 +384,40 @@ class UwbSessionConfigTest {
         assertNull(restored.sessionKey)
         assertNull(restored.accessoryData)
     }
+
+    // -- Pairwise session id (one session per peer) --
+
+    @Test
+    fun sessionIdForAgreesOnBothEnds() {
+        // The controller folds (its controller addr, peer's controlee addr); the controlee folds
+        // (peer's controller addr, its own controlee addr). Same inputs, same id, no round trip.
+        val controllerAddr = byteArrayOf(0x12, 0x34)
+        val controleeAddr = byteArrayOf(0x09, 0x4d.toByte())
+        val onController = UwbSessionConfig.sessionIdFor(controllerAddr, controleeAddr)
+        val onControlee = UwbSessionConfig.sessionIdFor(controllerAddr.copyOf(), controleeAddr.copyOf())
+        assertEquals(onController, onControlee)
+    }
+
+    @Test
+    fun sessionIdForDiffersPerPeer() {
+        // A phone that is controller to two peers needs two distinct ids on the same radio.
+        val myController = byteArrayOf(0x12, 0x34)
+        val peerA = byteArrayOf(0x09, 0x4d.toByte())
+        val peerB = byteArrayOf(0x05, 0x88.toByte())
+        assertTrue(UwbSessionConfig.sessionIdFor(myController, peerA) != UwbSessionConfig.sessionIdFor(myController, peerB))
+    }
+
+    @Test
+    fun sessionIdForIsRoleOrdered() {
+        // Swapping the roles is a different session; the order encodes who is controller.
+        val a = byteArrayOf(0x12, 0x34)
+        val b = byteArrayOf(0x09, 0x4d.toByte())
+        assertTrue(UwbSessionConfig.sessionIdFor(a, b) != UwbSessionConfig.sessionIdFor(b, a))
+    }
+
+    @Test
+    fun sessionIdForIsNeverZero() {
+        // 0 tells the stack to derive its own id, which the two ends would then not share.
+        assertTrue(UwbSessionConfig.sessionIdFor(ByteArray(0), ByteArray(0)) != 0)
+    }
 }

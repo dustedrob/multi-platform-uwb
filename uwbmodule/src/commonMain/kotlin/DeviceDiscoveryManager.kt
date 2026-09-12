@@ -77,21 +77,35 @@ class DeviceDiscoveryManager(
     private val accessoryPeers = mutableSetOf<String>()
 
     /**
-     * Maps a peer's stable UWB address (hex) to the peerId currently ranging with it.
+     * Maps a peer's stable identity key (hex) to the peerId currently ranging with it.
      *
      * On Android a single phone appears under several randomized BLE addresses because it both scans
      * and runs a GATT server, so the same physical device arrives under different peerIds. The UWB
-     * address inside the exchanged config is the stable identity, so we key on it and let the newest
-     * connection win — a fresh peerId for a known UWB address supersedes the stale one, keeping one
-     * device entry and one ranging session. Unused on iOS, where the CoreBluetooth UUID is already
-     * stable and the config carries no UWB address.
+     * address is no longer stable across those identities (each peer gets its own session scope, so
+     * a phone hands each of our BLE identities a different address), but the static-STS session key
+     * is generated once per manager and shipped in every config, so it identifies the device. Unused
+     * on iOS, where the CoreBluetooth UUID is already stable and the config carries no key.
      */
-    private val uwbKeyToPeer = mutableMapOf<String, String>()
+    private val identityKeyToPeer = mutableMapOf<String, String>()
 
     companion object {
         /** Devices not seen within this window are considered stale and removed. */
         private const val STALE_THRESHOLD_MS = 10_000L
         private const val CLEANUP_INTERVAL_MS = 5_000L
+
+        /**
+         * Stable identity of the device behind a config, or null when the platform gives none (iOS).
+         *
+         * Phones: the session key (see [identityKeyToPeer]). Accessories: their UWB address, which is
+         * a fixed hardware address; the "remote" config for an accessory is our own config with the
+         * accessory's address patched in, so its key would be ours and every accessory would collide.
+         */
+        internal fun identityKeyFor(remoteConfig: UwbSessionConfig): String? = when {
+            remoteConfig.isAccessoryDevice ->
+                remoteConfig.uwbAddress.takeIf { it.isNotEmpty() }?.let { "acc:" + it.toHexString() }
+            else ->
+                remoteConfig.sessionKey?.takeIf { it.isNotEmpty() }?.let { "key:" + it.toHexString() }
+        }
     }
 
     init {
@@ -114,8 +128,11 @@ class DeviceDiscoveryManager(
             bleManager.sendToPeer(peerId, data)
         }
 
-        multiplatformUwbManager.setErrorCallback { error ->
-            emitEvent(EventType.Error, "", error)
+        multiplatformUwbManager.setErrorCallback { peerId, error ->
+            emitEvent(EventType.Error, peerId ?: "", error)
+            // A per-peer failure only takes that peer out of Ranging, so stale cleanup can drop it
+            // and a re-discovery can start over, while the other sessions carry on.
+            if (peerId != null) scope.launch { onRangingError(peerId, error) }
         }
     }
 
@@ -176,7 +193,7 @@ class DeviceDiscoveryManager(
         exchangedPeers.clear()
         pendingExchanges.clear()
         accessoryPeers.clear()
-        uwbKeyToPeer.clear()
+        identityKeyToPeer.clear()
     }
 
     /**
@@ -200,10 +217,19 @@ class DeviceDiscoveryManager(
             stale.forEach { device ->
                 pendingExchanges.remove(device.id)
                 exchangedPeers.remove(device.id)
+                identityKeyToPeer.entries.removeAll { it.value == device.id }
                 emitEvent(EventType.Error, device.id, "Device stale, removed: ${device.name}")
             }
             _nearbyDevices.value = active
         }
+    }
+
+    /** A ranging session for one peer failed or ended; mark just that device so it can age out. */
+    internal suspend fun onRangingError(peerId: String, error: String) = mutex.withLock {
+        val devices = _nearbyDevices.value
+        val idx = devices.indexOfFirst { it.id == peerId }
+        if (idx == -1 || devices[idx].state != DeviceState.Ranging) return@withLock
+        updateDeviceStateLocked(peerId, DeviceState.Error, error)
     }
 
     private fun emitEvent(type: EventType, peerId: String, message: String) {
@@ -248,31 +274,34 @@ class DeviceDiscoveryManager(
      * Called when BLE GATT config exchange completes with a peer.
      * Starts UWB ranging with the exchanged config.
      */
-    internal suspend fun onConfigExchanged(peerId: String, remoteConfig: UwbSessionConfig) = mutex.withLock {
+    internal suspend fun onConfigExchanged(peerId: String, remoteConfig: UwbSessionConfig) {
+        var duplicateOf: String? = null
+        val shouldStart = mutex.withLock {
             // Guard against duplicate callbacks (both GATT client read and server write fire this)
-            if (peerId in exchangedPeers) return
+            if (peerId in exchangedPeers) return@withLock false
             pendingExchanges.remove(peerId)
             exchangedPeers.add(peerId)
             if (remoteConfig.isAccessoryDevice || remoteConfig.accessoryData!=null) accessoryPeers.add(peerId)
 
             // Collapse duplicate BLE identities of the same physical device. A phone both scans and
             // serves under randomized BLE addresses, so the same device arrives under several peerIds;
-            // the UWB address in the exchanged config is the stable identity. If we're already ranging
-            // that UWB address, keep the first session and ignore the duplicate rather than tearing the
-            // live one down (which churned the session and cancelled its coroutine). Skipped on iOS
-            // (empty uwbAddress), where the peerId is already stable.
-            val uwbKey = remoteConfig.uwbAddress.takeIf { it.isNotEmpty() }?.toHexString()
-            if (uwbKey != null) {
-                val prevPeerId = uwbKeyToPeer[uwbKey]
+            // the session key in the exchanged config is the stable identity (see identityKeyToPeer).
+            // If we're already ranging that device, keep the first session and ignore the duplicate
+            // rather than tearing the live one down (which churned the session and cancelled its
+            // coroutine). Skipped on iOS (no key), where the peerId is already stable.
+            val identityKey = identityKeyFor(remoteConfig)
+            if (identityKey != null) {
+                val prevPeerId = identityKeyToPeer[identityKey]
                 if (prevPeerId != null && prevPeerId != peerId) {
                     // Already ranging this device under another BLE identity. Keep the live session and
                     // drop this identity's placeholder entry so the UI shows one device, not two.
                     // peerId stays in exchangedPeers so we don't re-exchange with the duplicate.
                     _nearbyDevices.value = _nearbyDevices.value.filterNot { it.id == peerId }
-                    emitEvent(EventType.DeviceDiscovered, peerId, "Ignored duplicate identity of $prevPeerId (UWB $uwbKey)")
-                    return
+                    emitEvent(EventType.DeviceDiscovered, peerId, "Ignored duplicate identity of $prevPeerId (key $identityKey)")
+                    duplicateOf = prevPeerId
+                    return@withLock false
                 }
-                uwbKeyToPeer[uwbKey] = peerId
+                identityKeyToPeer[identityKey] = peerId
             }
 
             emitEvent(
@@ -302,11 +331,17 @@ class DeviceDiscoveryManager(
             _nearbyDevices.value = existingDevices
 
             emitEvent(EventType.RangingStarted, peerId, "UWB ranging started")
-        
+            true
+        }
 
-        // Start UWB ranging outside the lock (startRanging may take time)
-        multiplatformUwbManager.startRanging(peerId, remoteConfig)
+        // Start UWB ranging outside the lock: with several peers, one session start must not hold up
+        // the callbacks of the others.
+        if (shouldStart) multiplatformUwbManager.startRanging(peerId, remoteConfig)
+        // The duplicate identity never ranges, so hand back the session resources (on Android the
+        // per-peer scopes and their addresses) that were minted for it at discovery.
+        if (duplicateOf != null) multiplatformUwbManager.stopRanging(peerId)
     }
+
 
     /** Called when UWB ranging data is received. */
     internal suspend fun onRangingResult(peerId: String, distance: Double, azimuth: Double?, elevation: Double?) = mutex.withLock {

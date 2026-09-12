@@ -32,7 +32,7 @@ class UwbDiscoveryViewModel(
         // Phone-to-phone over LOCAL_PROFILE, plus the Qorvo accessory (app-owned profile).
         managerFactory.createBleManager(
             BleDiscoveryConfig(
-                profiles = listOf(LOCAL_PROFILE, QorvoNearbyProfile),
+                profiles = listOf(LOCAL_PROFILE, QorvoNearbyProfile, CNCustomProfile),
                 // Opt in to the Android accessory protocol (the bespoke write-init / notify-back
                 // exchange). It is OFF by default in the library because on Android it only works
                 // against compatible custom accessory firmware (see the "Accessory ranging" section in
