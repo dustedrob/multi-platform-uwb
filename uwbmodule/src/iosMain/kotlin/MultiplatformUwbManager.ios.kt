@@ -11,6 +11,9 @@ import platform.Foundation.NSKeyedUnarchiver
 import platform.Foundation.NSLog
 import platform.Foundation.NSProcessInfo
 import platform.Foundation.timeIntervalSince1970
+import platform.ARKit.ARSession
+import platform.ARKit.ARSessionDelegateProtocol
+import platform.ARKit.ARWorldTrackingConfiguration
 import platform.NearbyInteraction.NIAlgorithmConvergence
 import platform.NearbyInteraction.NIAlgorithmConvergenceStatus
 import platform.NearbyInteraction.NIAlgorithmConvergenceStatusReasonInsufficientHorizontalSweep
@@ -65,6 +68,36 @@ actual class MultiplatformUwbManager {
      * the suspension ends (NI requires `runWithConfiguration` again; it does not resume by itself).
      */
     private val peerConfigs = mutableMapOf<String, NIConfiguration>()
+
+    /**
+     * One ARSession shared by every NISession that uses camera assistance. Left to itself, NI spins
+     * up a private ARSession per NISession, and two of those contend for the camera, which suspends
+     * the first session as soon as the second starts. The delegate also opts out of relocalization:
+     * camera assistance requires `sessionShouldAttemptRelocalization == false`, and resuming from a
+     * stale map stalls ranging after a restart.
+     */
+    private var sharedArSession: ARSession? = null
+
+    /** Strong reference; ARSession.delegate is weak, like NISession's. */
+    private var arSessionDelegate: ArSessionObserver? = null
+
+    private class ArSessionObserver : NSObject(), ARSessionDelegateProtocol {
+        override fun sessionShouldAttemptRelocalization(session: ARSession): Boolean = false
+    }
+
+    /** Hand [session] the shared ARSession. Call only when camera assistance was enabled (iOS 16+). */
+    private fun attachSharedArSession(session: NISession) {
+        val ar = sharedArSession ?: ARSession().also {
+            arSessionDelegate = ArSessionObserver()
+            it.delegate = arSessionDelegate
+            it.runWithConfiguration(ARWorldTrackingConfiguration())
+            sharedArSession = it
+        }
+        // NearbyInteraction only forward-declares ARSession, so K/N types the parameter as the
+        // objcnames placeholder; the cast is a no-op at runtime.
+        @Suppress("UNCHECKED_CAST")
+        session.setARSession(ar as objcnames.classes.ARSession)
+    }
 
     private fun peerIdFor(session: NISession): String =
         peerSessions.entries.firstOrNull { it.value == session }?.key ?: "unknown"
@@ -145,11 +178,13 @@ actual class MultiplatformUwbManager {
                 return
             }
             // check for camera assistance in later iOS systems
+            var cameraAssist = false
             if(!NISession.deviceCapabilities.supportsDirectionMeasurement) {
                 NSLog("MultiPlatformMgr device does not support direction measurement");
                 if (NISession.deviceCapabilities.supportsCameraAssistance) {
                     NSLog("MultiPlatformMgr device DOES support camera assistance")
                     config.setCameraAssistanceEnabled(true)
+                    cameraAssist = true
                 } else {
                     NSLog("MultiPlatformMgr device DOES NOT support camera assistance")
                 }
@@ -166,6 +201,7 @@ actual class MultiplatformUwbManager {
             // NISession.delegate is weak, so hold each session's delegate strongly per session.
             val delegate = activeDelegates[session] ?: SessionDelegate().also { activeDelegates[session] = it }
             session.delegate = delegate
+            if (cameraAssist) attachSharedArSession(session)
             peerConfigs[peerId] = config
             session.runWithConfiguration(config)
             return
@@ -198,11 +234,13 @@ actual class MultiplatformUwbManager {
         activePeers[peerId] = peerToken
         // Create a peer configuration with the exchanged token
         val config = NINearbyPeerConfiguration(peerToken)
+        var cameraAssist = false
         if(!NISession.deviceCapabilities.supportsDirectionMeasurement) {
             NSLog("MultiPlatformMgr device does not support direction measurement");
             if (NISession.deviceCapabilities.supportsCameraAssistance) {
                 NSLog("MultiPlatformMgr device DOES support camera assistance")
                 config.setCameraAssistanceEnabled(true)
+                cameraAssist = true
             } else {
                 NSLog("MultiPlatformMgr device DOES NOT support camera assistance")
             }
@@ -218,6 +256,7 @@ actual class MultiplatformUwbManager {
         // NISession.delegate is weak, so hold each session's delegate strongly per session.
         val delegate = activeDelegates[session] ?: SessionDelegate().also { activeDelegates[session] = it }
         session.delegate = delegate
+        if (cameraAssist) attachSharedArSession(session)
         peerConfigs[peerId] = config
         session.runWithConfiguration(config)
     }
@@ -261,6 +300,9 @@ actual class MultiplatformUwbManager {
         activeDelegates.clear()
         peerConfigs.clear()
         connectionConfigs.clear()
+        sharedArSession?.pause()
+        sharedArSession = null
+        arSessionDelegate = null
         NSLog("UwbManager: Cleanup completed")
     }
 
@@ -388,9 +430,13 @@ actual class MultiplatformUwbManager {
         override fun sessionWasSuspended(session: NISession) {
             val peerId = peerIdFor(session)
             NSLog("UwbManager: Session suspended for ${peerId}")
-            // Suspension is transient (backgrounding, or NI juggling several sessions), so do not
-            // tell an accessory to stop here: that made the suspension permanent, and the accessory
-            // only learns about a real stop from stopRanging. We re-run when the suspension ends.
+            // A suspended session stops answering, so an accessory left running would range into a
+            // void until it times out and fails, while we still hold its BLE connection. Tell it to
+            // hold. This is no longer permanent: sessionSuspensionEnded re-runs the session and NI
+            // generates fresh shareable configuration data, which restarts the accessory.
+            if (peerId in accessoryPeers) {
+                sendToPeerCallback?.invoke(peerId, byteArrayOf(NI_ACCESSORY_STOP))
+            }
             dispatchToMain {
                 errorCallback?.invoke(peerId, "NI Session was suspended for $peerId")
             }
