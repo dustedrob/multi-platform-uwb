@@ -76,8 +76,11 @@ class DeviceDiscoveryManager(
     /** Accessory peers — these stay BLE-connected during ranging and need a stop handshake. */
     private val accessoryPeers = mutableSetOf<String>()
 
+    /** The BLE identity (peerId) we range with for one physical device, and how it scored. */
+    private class PeerBinding(val peerId: String, val score: String)
+
     /**
-     * Maps a peer's stable identity key (hex) to the peerId currently ranging with it.
+     * Maps a peer's stable identity key (hex) to the BLE identity currently ranging with it.
      *
      * On Android a single phone appears under several randomized BLE addresses because it both scans
      * and runs a GATT server, so the same physical device arrives under different peerIds. The UWB
@@ -86,12 +89,28 @@ class DeviceDiscoveryManager(
      * is generated once per manager and shipped in every config, so it identifies the device. Unused
      * on iOS, where the CoreBluetooth UUID is already stable and the config carries no key.
      */
-    private val identityKeyToPeer = mutableMapOf<String, String>()
+    private val identityKeyToPeer = mutableMapOf<String, PeerBinding>()
 
     companion object {
         /** Devices not seen within this window are considered stale and removed. */
         private const val STALE_THRESHOLD_MS = 10_000L
+        /** A suspended session gets longer: iOS keeps them for a while and re-runs them on resume. */
+        private const val SUSPENDED_THRESHOLD_MS = 60_000L
         private const val CLEANUP_INTERVAL_MS = 5_000L
+
+        /**
+         * Which of a device's BLE connections to range over, decided the same way on both ends.
+         *
+         * With one session scope per BLE identity, the two phones must range over the same
+         * connection or they target addresses the other side never uses. Neither side knows which
+         * connection the other saw first (the GATT client always completes an exchange one round trip
+         * before the server), but both see the same two configs on a given connection, so a score
+         * built from the unordered pair of addresses is identical on both ends. Lower wins.
+         */
+        internal fun connectionScore(local: UwbSessionConfig, remote: UwbSessionConfig): String =
+            listOf(local.uwbAddress.toHexString(), remote.uwbAddress.toHexString())
+                .sorted()
+                .joinToString("|")
 
         /**
          * Stable identity of the device behind a config, or null when the platform gives none (iOS).
@@ -133,6 +152,10 @@ class DeviceDiscoveryManager(
             // A per-peer failure only takes that peer out of Ranging, so stale cleanup can drop it
             // and a re-discovery can start over, while the other sessions carry on.
             if (peerId != null) scope.launch { onRangingError(peerId, error) }
+        }
+
+        multiplatformUwbManager.setSessionEventCallback { peerId, event ->
+            scope.launch { onSessionEvent(peerId, event) }
         }
     }
 
@@ -181,10 +204,11 @@ class DeviceDiscoveryManager(
 
         // Stop all active UWB ranging sessions. Accessory peers also get a BLE stop command so the
         // accessory ends ranging and the BLE layer disconnects after its didStop confirmation.
-        _nearbyDevices.value.forEach { device ->
-            multiplatformUwbManager.stopRanging(device.id)
-            if (device.id in accessoryPeers) {
-                bleManager.sendToPeer(device.id, byteArrayOf(NI_ACCESSORY_STOP))
+        // exchangedPeers covers sessions whose device entry is gone (purged, or a duplicate identity).
+        (_nearbyDevices.value.map { it.id } + exchangedPeers).distinct().forEach { peerId ->
+            multiplatformUwbManager.stopRanging(peerId)
+            if (peerId in accessoryPeers) {
+                bleManager.sendToPeer(peerId, byteArrayOf(NI_ACCESSORY_STOP))
             }
         }
 
@@ -207,20 +231,29 @@ class DeviceDiscoveryManager(
         scope.cancel()
     }
 
-    private suspend fun removeStaleDevices() = mutex.withLock {
-        val now = getCurrentTimeMillis()
-        val currentDevices = _nearbyDevices.value
-        val (stale, active) = currentDevices.partition { device ->
-            device.state != DeviceState.Ranging && (now - device.lastSeen) > STALE_THRESHOLD_MS
-        }
-        if (stale.isNotEmpty()) {
+    private suspend fun removeStaleDevices() {
+        val stale = mutex.withLock {
+            val now = getCurrentTimeMillis()
+            val currentDevices = _nearbyDevices.value
+            val (stale, active) = currentDevices.partition { device ->
+                val threshold = if (device.state == DeviceState.Suspended) SUSPENDED_THRESHOLD_MS else STALE_THRESHOLD_MS
+                device.state != DeviceState.Ranging && (now - device.lastSeen) > threshold
+            }
             stale.forEach { device ->
                 pendingExchanges.remove(device.id)
                 exchangedPeers.remove(device.id)
-                identityKeyToPeer.entries.removeAll { it.value == device.id }
+                accessoryPeers.remove(device.id)
+                identityKeyToPeer.entries.removeAll { it.value.peerId == device.id }
                 emitEvent(EventType.Error, device.id, "Device stale, removed: ${device.name}")
             }
-            _nearbyDevices.value = active
+            if (stale.isNotEmpty()) _nearbyDevices.value = active
+            stale
+        }
+        // Actually let go of the peer: release its session (a purged entry would otherwise keep a
+        // live session no one can stop) and the BLE cache entry, so it can be discovered again.
+        stale.forEach { device ->
+            multiplatformUwbManager.stopRanging(device.id)
+            bleManager.forgetDevice(device.id)
         }
     }
 
@@ -228,8 +261,33 @@ class DeviceDiscoveryManager(
     internal suspend fun onRangingError(peerId: String, error: String) = mutex.withLock {
         val devices = _nearbyDevices.value
         val idx = devices.indexOfFirst { it.id == peerId }
-        if (idx == -1 || devices[idx].state != DeviceState.Ranging) return@withLock
+        if (idx == -1 || devices[idx].state == DeviceState.Error) return@withLock
         updateDeviceStateLocked(peerId, DeviceState.Error, error)
+    }
+
+    /**
+     * Non-fatal session events. The session is still alive, so the device is shown as paused
+     * rather than failed and gets a longer stale window; accessories are told to hold while the
+     * session is suspended, over a BLE link that stays open for the resume.
+     */
+    internal suspend fun onSessionEvent(peerId: String, event: SessionEvent) {
+        val isAccessory = mutex.withLock {
+            val now = getCurrentTimeMillis()
+            val devices = _nearbyDevices.value.toMutableList()
+            val idx = devices.indexOfFirst { it.id == peerId }
+            if (idx == -1) return
+            val state = if (event == SessionEvent.Resumed) DeviceState.Ranging else DeviceState.Suspended
+            devices[idx] = devices[idx].copy(state = state, lastSeen = now, errorMessage = null)
+            _nearbyDevices.value = devices
+            emitEvent(EventType.RangingUpdate, peerId, "Session ${event.name.lowercase()}")
+            peerId in accessoryPeers
+        }
+        if (isAccessory && event == SessionEvent.Suspended) {
+            // A suspended session stops answering, so an accessory left running would range into a
+            // void until it fails. The link is kept so the resume's configure-and-start can reach it.
+            bleManager.retainAccessoryLink(peerId)
+            bleManager.sendToPeer(peerId, byteArrayOf(NI_ACCESSORY_STOP))
+        }
     }
 
     private fun emitEvent(type: EventType, peerId: String, message: String) {
@@ -276,6 +334,7 @@ class DeviceDiscoveryManager(
      */
     internal suspend fun onConfigExchanged(peerId: String, remoteConfig: UwbSessionConfig) {
         var duplicateOf: String? = null
+        var supersedes: String? = null
         val shouldStart = mutex.withLock {
             // Guard against duplicate callbacks (both GATT client read and server write fire this)
             if (peerId in exchangedPeers) return@withLock false
@@ -286,22 +345,31 @@ class DeviceDiscoveryManager(
             // Collapse duplicate BLE identities of the same physical device. A phone both scans and
             // serves under randomized BLE addresses, so the same device arrives under several peerIds;
             // the session key in the exchanged config is the stable identity (see identityKeyToPeer).
-            // If we're already ranging that device, keep the first session and ignore the duplicate
-            // rather than tearing the live one down (which churned the session and cancelled its
-            // coroutine). Skipped on iOS (no key), where the peerId is already stable.
+            // Both ends must settle on the same connection (see connectionScore): the better-scoring
+            // one wins whichever order they arrive in, so at most one switch happens, and it happens
+            // on both phones. Skipped on iOS (no key), where the peerId is already stable.
             val identityKey = identityKeyFor(remoteConfig)
             if (identityKey != null) {
-                val prevPeerId = identityKeyToPeer[identityKey]
-                if (prevPeerId != null && prevPeerId != peerId) {
-                    // Already ranging this device under another BLE identity. Keep the live session and
-                    // drop this identity's placeholder entry so the UI shows one device, not two.
-                    // peerId stays in exchangedPeers so we don't re-exchange with the duplicate.
-                    _nearbyDevices.value = _nearbyDevices.value.filterNot { it.id == peerId }
-                    emitEvent(EventType.DeviceDiscovered, peerId, "Ignored duplicate identity of $prevPeerId (key $identityKey)")
-                    duplicateOf = prevPeerId
-                    return@withLock false
+                val local = multiplatformUwbManager.getConnectionConfig(peerId)
+                val score = if (local != null) connectionScore(local, remoteConfig) else ""
+                val prev = identityKeyToPeer[identityKey]
+                if (prev != null && prev.peerId != peerId) {
+                    if (local == null || score >= prev.score) {
+                        // Keep the live session; drop this identity's placeholder entry so the UI
+                        // shows one device, not two. peerId stays in exchangedPeers so we don't
+                        // re-exchange with the duplicate.
+                        _nearbyDevices.value = _nearbyDevices.value.filterNot { it.id == peerId }
+                        emitEvent(EventType.DeviceDiscovered, peerId, "Ignored duplicate identity of ${prev.peerId} (key $identityKey)")
+                        duplicateOf = prev.peerId
+                        return@withLock false
+                    }
+                    // This connection scores better: the peer will pick it too, so move over.
+                    _nearbyDevices.value = _nearbyDevices.value.filterNot { it.id == prev.peerId }
+                    accessoryPeers.remove(prev.peerId)
+                    emitEvent(EventType.DeviceDiscovered, peerId, "Switching from identity ${prev.peerId} (key $identityKey)")
+                    supersedes = prev.peerId
                 }
-                identityKeyToPeer[identityKey] = peerId
+                identityKeyToPeer[identityKey] = PeerBinding(peerId, score)
             }
 
             emitEvent(
@@ -334,8 +402,10 @@ class DeviceDiscoveryManager(
             true
         }
 
-        // Start UWB ranging outside the lock: with several peers, one session start must not hold up
-        // the callbacks of the others.
+        // Outside the lock: with several peers, one session start must not hold up the callbacks of
+        // the others. A superseded identity is stopped first so its scopes are released before the
+        // replacement starts.
+        supersedes?.let { multiplatformUwbManager.stopRanging(it) }
         if (shouldStart) multiplatformUwbManager.startRanging(peerId, remoteConfig)
         // The duplicate identity never ranges, so hand back the session resources (on Android the
         // per-peer scopes and their addresses) that were minted for it at discovery.
