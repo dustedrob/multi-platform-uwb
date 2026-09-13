@@ -37,6 +37,7 @@ actual class MultiplatformUwbManager {
 
     private var rangingCallback: ((String, Double, Double?, Double?) -> Unit)? = null
     private var errorCallback: ((String?, String) -> Unit)? = null
+    private var sessionEventCallback: ((String, SessionEvent) -> Unit)? = null
 
     /** Outbound channel to write data back to a peer over BLE (wired to BleManager.sendToPeer). */
     private var sendToPeerCallback: ((String, ByteArray) -> Unit)? = null
@@ -288,6 +289,10 @@ actual class MultiplatformUwbManager {
         sendToPeerCallback = callback
     }
 
+    actual fun setSessionEventCallback(callback: (peerId: String, event: SessionEvent) -> Unit) {
+        sessionEventCallback = callback
+    }
+
     actual fun setErrorCallback(callback: (peerId: String?, error: String) -> Unit) {
         errorCallback = callback
     }
@@ -349,12 +354,19 @@ actual class MultiplatformUwbManager {
         ) {
             dispatchToMain {
                 val peerId = peerIdFor(session)
-                didRemoveNearbyObjects.forEach { obj ->
-                    if (obj is NINearbyObject) {
-                        activePeers.remove(peerId)
-                        NSLog("UwbManager: Peer $peerId removed, reason=$withReason")
-                        errorCallback?.invoke(peerId, "Peer $peerId out of range (reason=$withReason)")
-                    }
+                if (didRemoveNearbyObjects.none { it is NINearbyObject }) return@dispatchToMain
+                NSLog("UwbManager: Peer $peerId removed, reason=$withReason")
+                if (withReason == NINearbyObjectRemovalReason.NINearbyObjectRemovalReasonPeerEnded) {
+                    // The peer invalidated its session; ours will never hear from it again.
+                    session.invalidate()
+                    forgetPeer(peerId)
+                    errorCallback?.invoke(peerId, "Peer $peerId ended the session")
+                } else {
+                    // Timeout: NI stops updating this object but the session is ours to re-run,
+                    // which is what Apple recommends. The peer either comes back or ages out.
+                    activePeers.remove(peerId)
+                    peerConfigs[peerId]?.let { session.runWithConfiguration(it) }
+                    sessionEventCallback?.invoke(peerId, SessionEvent.PeerLost)
                 }
             }
         }
@@ -430,15 +442,10 @@ actual class MultiplatformUwbManager {
         override fun sessionWasSuspended(session: NISession) {
             val peerId = peerIdFor(session)
             NSLog("UwbManager: Session suspended for ${peerId}")
-            // A suspended session stops answering, so an accessory left running would range into a
-            // void until it times out and fails, while we still hold its BLE connection. Tell it to
-            // hold. This is no longer permanent: sessionSuspensionEnded re-runs the session and NI
-            // generates fresh shareable configuration data, which restarts the accessory.
-            if (peerId in accessoryPeers) {
-                sendToPeerCallback?.invoke(peerId, byteArrayOf(NI_ACCESSORY_STOP))
-            }
+            // Not an error: the session is intact and re-run when the suspension ends. The
+            // orchestrator handles the accessory side (stop while suspended, link kept open).
             dispatchToMain {
-                errorCallback?.invoke(peerId, "NI Session was suspended for $peerId")
+                sessionEventCallback?.invoke(peerId, SessionEvent.Suspended)
             }
         }
 
@@ -446,9 +453,13 @@ actual class MultiplatformUwbManager {
             val peerId = peerIdFor(session)
             NSLog("UwbManager: Session suspension ended for $peerId")
             // NI does not resume by itself; the session has to be run with its configuration again.
+            // For an accessory that produces fresh shareable configuration data, which restarts it.
             val config = peerConfigs[peerId]
             if (config != null) {
                 session.runWithConfiguration(config)
+                dispatchToMain {
+                    sessionEventCallback?.invoke(peerId, SessionEvent.Resumed)
+                }
             } else {
                 NSLog("UwbManager: No stored configuration for $peerId; cannot resume")
             }
