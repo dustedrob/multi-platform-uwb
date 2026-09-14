@@ -74,7 +74,7 @@ expect class MultiplatformUwbManager {
      */
     fun setErrorCallback(callback: (peerId: String?, error: String) -> Unit)
 
-    fun setStatusCallback(callback: (peerId: String, message: String) -> Unit)
+    fun setStatusEventCallback(callback: (peerId: String, message: String) -> Unit)
 
     /** Clean up resources and unbind services. Call when done using the manager. */
     suspend fun cleanup()

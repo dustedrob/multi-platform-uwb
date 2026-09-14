@@ -42,7 +42,7 @@ actual class MultiplatformUwbManager {
     /** Outbound channel to write data back to a peer over BLE (wired to BleManager.sendToPeer). */
     private var sendToPeerCallback: ((String, ByteArray) -> Unit)? = null
 
-    private var statusCallback: ((String, String) -> Unit)? = null
+    private var statusEventCallback: ((String, String) -> Unit)? = null
     /**
      * NearbyInteraction direction APIs (`horizontalAngle`, `verticalDirectionEstimate`) are iOS 16+.
      * Calling them on iOS 14/15 is an unrecognized selector and crashes, so gate on the OS version.
@@ -298,8 +298,8 @@ actual class MultiplatformUwbManager {
         errorCallback = callback
     }
 
-    actual fun setStatusCallback(callback: (peerId: String, message: String) -> Unit) {
-        statusCallback = callback
+    actual fun setStatusEventCallback(callback: (peerId: String, message: String) -> Unit) {
+        statusEventCallback = callback
     }
 
     actual suspend fun cleanup() {
@@ -434,7 +434,7 @@ actual class MultiplatformUwbManager {
                         }
                         NSLog("UwbManager: convergence not converged — $message")
                         val peerId = peerIdFor(session)
-                        statusCallback?.invoke(peerId,message)
+                        statusEventCallback?.invoke(peerId,message)
 
                     }
                 }
