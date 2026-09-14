@@ -38,6 +38,8 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
      * unlike iOS where NI produces shareable configuration data after the session runs).
      */
     private var sendToPeerCallback: ((String, ByteArray) -> Unit)? = null
+
+    private var statusEventCallback: ((String, String) ->Unit)? = null
     private val coroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     /** Active ranging coroutine jobs, keyed by peer ID. Cancel to stop ranging. */
@@ -337,6 +339,9 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
         errorCallback = callback
     }
 
+    actual fun setStatusEventCallback(callback: (peerId: String, message: String) -> Unit) {
+        statusEventCallback = callback
+    }
     /** Stop all sessions and clean up resources. */
     actual suspend fun cleanup() {
         activeJobs.values.forEach { it.cancel() }
