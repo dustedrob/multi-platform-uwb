@@ -461,15 +461,6 @@ class DeviceDiscoveryManager(
             )
             _nearbyDevices.value = existingDevices
         }
-        emitEvent(
-            EventType.RangingUpdate,
-            peerId,
-            "distance=$distance azimuth=$azimuth",
-            distance = distance,
-            azimuth = azimuth,
-            elevation = elevation,
-            name = name,
-        )
     }
 
     /** Must be called while holding [mutex]. */
