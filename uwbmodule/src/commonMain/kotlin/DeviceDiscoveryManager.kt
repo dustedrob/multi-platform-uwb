@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -35,7 +36,11 @@ data class DiscoveryEvent(
     val timestamp: Long,
     val type: EventType,
     val peerId: String,
-    val message: String
+    val message: String,
+    val distance: Double? = null,
+    val azimuth: Double? = null,
+    val elevation: Double? = null,
+    val name: String? = null,
 )
 
 
@@ -55,11 +60,17 @@ class DeviceDiscoveryManager(
     private val _nearbyDevices = MutableStateFlow<List<NearbyDevice>>(emptyList())
     val nearbyDevices: Flow<List<NearbyDevice>> = _nearbyDevices.asStateFlow()
 
-    private val _events = MutableSharedFlow<DiscoveryEvent>(extraBufferCapacity = 64)
+    private val _events = MutableSharedFlow<DiscoveryEvent>(
+        extraBufferCapacity = 64,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
     /** Lifecycle events for UI debugging. */
     val events: Flow<DiscoveryEvent> = _events.asSharedFlow()
 
     private var isScanning = false
+
+    /** When set, only BLE peers for which this returns true are connected and ranged. */
+    private var deviceFilter: ((bleId: String, advertisedName: String) -> Boolean)? = null
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var cleanupJob: Job? = null
@@ -166,19 +177,33 @@ class DeviceDiscoveryManager(
     /** Get the local UWB config (address, session ID, channel) for display. */
     //suspend fun getLocalConfig(): UwbSessionConfig? = multiplatformUwbManager.getLocalConfig(false)
 
-    suspend fun startScanning() {
+    /**
+     * @param deviceFilter Optional app predicate. Called with the platform BLE id (Android MAC or
+     *   iOS peripheral UUID) and the advertised GAP name. Return true to connect/range this peer.
+     *   Null accepts every discovery.
+     * @param advertise When false, this phone does not advertise as a UWB peer (accessory-controller mode).
+     * @param hostGattServer When false, skip the local GATT server (not needed when we only connect to accessories).
+     */
+    suspend fun startScanning(
+        deviceFilter: ((bleId: String, advertisedName: String) -> Boolean)? = null,
+        advertise: Boolean = true,
+        hostGattServer: Boolean = true,
+    ) {
         if (isScanning) return
         isScanning = true
+        this.deviceFilter = deviceFilter
 
         // Initialize UWB and wait for it to complete before reading local config
         multiplatformUwbManager.initialize()
 
-        // Start GATT server so peers can exchange configs with us
-        bleManager.startGattServer()
+        if (hostGattServer) {
+            bleManager.startGattServer()
+        }
 
-        // Start BLE scanning and advertising
         bleManager.startScanning()
-        bleManager.advertise()
+        if (advertise) {
+            bleManager.advertise()
+        }
 
         // Start periodic cleanup of stale devices
         cleanupJob = scope.launch {
@@ -218,6 +243,7 @@ class DeviceDiscoveryManager(
         pendingExchanges.clear()
         accessoryPeers.clear()
         identityKeyToPeer.clear()
+        deviceFilter = null
     }
 
     /**
@@ -299,6 +325,12 @@ class DeviceDiscoveryManager(
      * Initiates GATT config exchange if we haven't already.
      */
     internal suspend fun onDeviceDiscovered(id: String, name: String) = mutex.withLock {
+        val filter = deviceFilter
+        if (filter != null && !filter(id, name)) {
+            emitEvent(EventType.DeviceDiscovered, id, "Ignored by app filter: $name")
+            return@withLock
+        }
+
         // Add to device list if not already present
         val existingDevices = _nearbyDevices.value.toMutableList()
         val existingIdx = existingDevices.indexOfFirst { it.id == id }
@@ -418,8 +450,9 @@ class DeviceDiscoveryManager(
         val existingDevices = _nearbyDevices.value.toMutableList()
         val deviceIndex = existingDevices.indexOfFirst { it.id == peerId }
 
-        if (deviceIndex != -1) {                        
-            existingDevices[deviceIndex] = existingDevices[deviceIndex].copy(                
+        val name = if (deviceIndex != -1) existingDevices[deviceIndex].name else peerId
+        if (deviceIndex != -1) {
+            existingDevices[deviceIndex] = existingDevices[deviceIndex].copy(
                 distance = distance,
                 azimuth = azimuth,
                 elevation = elevation,
