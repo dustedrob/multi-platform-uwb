@@ -28,6 +28,11 @@ import android.os.ParcelUuid
 import android.util.Log
 import androidx.annotation.RequiresPermission
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import java.util.UUID
 
 private const val PREFERRED_MTU: Int = 256;
@@ -71,6 +76,15 @@ actual class BleManager(
         val queue: BleQueueManager,
     )
     private val accessoryConnections = mutableMapOf<String, AccessoryConnection>()
+
+    /** Accessories whose next did-stop must leave the BLE link open (see [retainAccessoryLink]). */
+    private val retainedLinks = mutableSetOf<String>()
+
+    /**
+     * Scan results arrive on the main looper, and preparing a peer's UWB config is several GMS round
+     * trips, so that work is moved off the callback here.
+     */
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     /** Profiles we host on the local GATT server — only phone-to-phone (read/write) ones. */
     private fun serverProfiles(): List<UwbProfile> =
@@ -140,9 +154,20 @@ actual class BleManager(
                 }
             }
             discoveredDevices[deviceAddress] = AccessoryDevice(device, profile)
-            uwbManager.createConnectionConfig(deviceAddress, profile?.exchange == ExchangeProtocol.AccessoryNotify)
+            val isAccessory = profile?.exchange == ExchangeProtocol.AccessoryNotify
             Log.d(TAG, "Found device: $deviceName ($deviceAddress) profile=${profile?.name}")
-            deviceDiscoveredCallback?.invoke(deviceAddress, deviceName)
+            // The config must exist before the app hears about the device (it hands the config to
+            // connectAndExchangeConfig), so report the discovery once it is ready. If it can't be
+            // prepared, drop the cache entry so the next advertisement retries.
+            scope.launch {
+                val config = uwbManager.prepareConnectionConfig(deviceAddress, isAccessory)
+                if (config == null) {
+                    discoveredDevices.remove(deviceAddress)
+                    Log.w(TAG, "No UWB config for $deviceAddress; will retry on next advertisement")
+                } else {
+                    deviceDiscoveredCallback?.invoke(deviceAddress, deviceName)
+                }
+            }
         }
 
         override fun onScanFailed(errorCode: Int) {
@@ -615,10 +640,15 @@ actual class BleManager(
                         }
                         NI_ACCESSORY_DID_START -> Log.d(TAG, "GATT client: accessory did start")
                         NI_ACCESSORY_DID_STOP -> {
-                            Log.d(TAG, "GATT client: accessory did stop")
-                            accessoryConnections.remove(peerId)
-                            gatt.disconnect()
-                            gatt.close()
+                            if (retainedLinks.remove(peerId)) {
+                                // Stopped only for a session suspension; the resume needs this link.
+                                Log.d(TAG, "GATT client: accessory did stop (link retained)")
+                            } else {
+                                Log.d(TAG, "GATT client: accessory did stop")
+                                accessoryConnections.remove(peerId)
+                                gatt.disconnect()
+                                gatt.close()
+                            }
                         }
                         else -> Log.d(TAG, "GATT client: unexpected accessory response ${value[0]}")
                     }
@@ -673,8 +703,24 @@ actual class BleManager(
         Log.d(TAG, "sendToPeer: wrote ${data.size} bytes to $peerId")
     }
 
+    actual fun retainAccessoryLink(peerId: String) {
+        retainedLinks.add(peerId)
+    }
+
+    @RequiresPermission(BLUETOOTH_CONNECT)
+    actual fun forgetDevice(peerId: String) {
+        discoveredDevices.remove(peerId)
+        retainedLinks.remove(peerId)
+        accessoryConnections.remove(peerId)?.let {
+            it.gatt.disconnect()
+            it.gatt.close()
+        }
+        Log.d(TAG, "Forgot $peerId; it will be reported again on its next advertisement")
+    }
+
     @RequiresPermission(BLUETOOTH_SCAN)
     actual fun cleanup() {
+        scope.cancel()
         stopScanning()
         stopAdvertising()
         stopGattServer()
@@ -682,6 +728,7 @@ actual class BleManager(
             accessoryConnections.values.forEach { it.gatt.close() }
         }
         accessoryConnections.clear()
+        retainedLinks.clear()
         discoveredDevices.clear()
         deviceDiscoveredCallback = null
         configExchangedCallback = null

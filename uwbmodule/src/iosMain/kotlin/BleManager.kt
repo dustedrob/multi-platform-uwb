@@ -38,6 +38,9 @@ actual class BleManager(
     )
     private val accessoryConnections = mutableMapOf<String, AccessoryConnection>()
 
+    /** Accessories whose next did-stop must leave the BLE link open (see [retainAccessoryLink]). */
+    private val retainedLinks = mutableSetOf<String>()
+
     // Deferred operations waiting for poweredOn
     private var scanWhenReady = false
     private var advertiseWhenReady = false
@@ -287,10 +290,15 @@ actual class BleManager(
                         }
                         NI_ACCESSORY_DID_START -> NSLog("BleManager: accessory did start")
                         NI_ACCESSORY_DID_STOP -> {
-                            NSLog("BleManager: accessory did stop")
-                            accessoryConnections.remove(peerId)
-                            centralManager?.cancelPeripheralConnection(peripheral)
-                            pendingConfigs.remove(peerId)
+                            if (retainedLinks.remove(peerId)) {
+                                // Stopped only for a session suspension; the resume needs this link.
+                                NSLog("BleManager: accessory did stop (link retained)")
+                            } else {
+                                NSLog("BleManager: accessory did stop")
+                                accessoryConnections.remove(peerId)
+                                centralManager?.cancelPeripheralConnection(peripheral)
+                                pendingConfigs.remove(peerId)
+                            }
                         }
                         else -> NSLog("BleManager: unexpected accessory response ${bytes[0]}")
                     }
@@ -512,6 +520,25 @@ actual class BleManager(
         NSLog("BleManager: Connecting to $peerId for config exchange")
     }
 
+    actual fun retainAccessoryLink(peerId: String) {
+        retainedLinks.add(peerId)
+    }
+
+    actual fun forgetDevice(peerId: String) {
+        discoveredPeripherals.remove(peerId)
+        retainedLinks.remove(peerId)
+        pendingConfigs.remove(peerId)
+        accessoryConnections.remove(peerId)?.let { centralManager?.cancelPeripheralConnection(it.peripheral) }
+        // CoreBluetooth reports a peripheral once per scan session (duplicates are off), so a
+        // forgotten one only comes back after the scan is restarted.
+        val central = centralManager
+        if (central != null && central.isScanning()) {
+            central.stopScan()
+            startScanning()
+        }
+        NSLog("BleManager: Forgot $peerId; it will be reported again on its next advertisement")
+    }
+
     actual fun sendToPeer(peerId: String, data: ByteArray) {
         val conn = accessoryConnections[peerId]
         if (conn == null) {
@@ -528,6 +555,7 @@ actual class BleManager(
         stopGattServer()
         accessoryConnections.values.forEach { centralManager?.cancelPeripheralConnection(it.peripheral) }
         accessoryConnections.clear()
+        retainedLinks.clear()
         discoveredPeripherals.clear()
         pendingConfigs.clear()
         deviceDiscoveredCallback = null
