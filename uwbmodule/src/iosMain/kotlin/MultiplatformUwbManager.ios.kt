@@ -31,6 +31,7 @@ import platform.NearbyInteraction.NISessionDelegateProtocol
 import platform.darwin.NSObject
 import platform.darwin.dispatch_async
 import platform.darwin.dispatch_get_main_queue
+import kotlin.math.atan2
 
 @OptIn(ExperimentalForeignApi::class)
 actual class MultiplatformUwbManager {
@@ -328,18 +329,11 @@ actual class MultiplatformUwbManager {
                             // convergence, so only emit it when available and valid. NearbyInteraction
                             // reports it in radians; convert to degrees to match the module contract
                             // (Android reports degrees), so consumers get one consistent unit.
-                            val azimuth: Double? =
-                                if (directionApiAvailable) {
-                                    obj.horizontalAngle.let {
-                                        if (it.isNaN()) null else it.toDouble() * 180.0 / PI
-                                    }
-                                } else {
-                                    null
-                                }
-
-                            // NearbyInteraction exposes no elevation angle — `verticalDirectionEstimate`
-                            // is a direction category (above/below/same), not a measurement — so we
-                            // leave elevation null on iOS rather than emit a meaningless value.
+                            // iPhone 11–13: NearbyInteraction fills `direction` (simd_float3 as
+                            // Vector128: x,y,z floats) and leaves `horizontalAngle` empty.
+                            // iPhone 14+: camera assistance fills `horizontalAngle` (radians) and
+                            // often omits `direction`. Convert both to degrees for the module.
+                            val azimuth = azimuthDegrees(obj)
                             rangingCallback?.invoke(peerId, distance, azimuth, null)
                         }
                     }
@@ -467,6 +461,32 @@ actual class MultiplatformUwbManager {
     }
 
     // ---- Helpers ----
+
+    /**
+     * `NINearbyObject.direction` is a simd_float3 imported as a non-null Vector128
+     * (x,y,z,pad floats). Kotlin/Native has no `.x/.y/.z`; read 32-bit lanes.
+     * Nearby Interaction's +z points toward the user (out the screen). Negate z so
+     * 0° = ahead (out the back of the phone). Keep x so right stays positive.
+     * A missing vector is all zeros / NaN — then fall back to `horizontalAngle`.
+     */
+    private fun azimuthDegrees(obj: NINearbyObject): Double? {
+        val dir = obj.direction
+        val x = dir.getFloatAt(0).toDouble()
+        val y = dir.getFloatAt(1).toDouble()
+        val z = dir.getFloatAt(2).toDouble()
+        val hasVector = !x.isNaN() && !y.isNaN() && !z.isNaN() && (x != 0.0 || y != 0.0 || z != 0.0)
+        if (hasVector) {
+            return atan2(x, -z) * 180.0 / PI
+        }
+        if (!directionApiAvailable) {
+            return null
+        }
+        val radians = obj.horizontalAngle
+        if (radians.isNaN()) {
+            return null
+        }
+        return radians.toDouble() * 180.0 / PI
+    }
 
     private fun dispatchToMain(block: () -> Unit) {
         dispatch_async(dispatch_get_main_queue()) { block() }
