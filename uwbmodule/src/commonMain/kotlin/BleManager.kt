@@ -53,6 +53,21 @@ expect class BleManager {
      */
     fun sendToPeer(peerId: String, data: ByteArray)
 
+    /**
+     * Keep the BLE connection to accessory [peerId] open across its next did-stop reply.
+     *
+     * The accessory protocol closes the link once the accessory confirms a stop. A stop sent because
+     * the platform merely suspended the session must not do that: the session will be re-run and the
+     * new configure-and-start needs the same link. The flag is consumed by that one did-stop.
+     */
+    fun retainAccessoryLink(peerId: String)
+
+    /**
+     * Forget everything about [peerId] so a later advertisement is reported as a new discovery.
+     * Closes any accessory connection. The discovery cache otherwise only clears in [cleanup].
+     */
+    fun forgetDevice(peerId: String)
+
     /** Clean up BLE resources. Call when done using the manager. */
     fun cleanup()
 }

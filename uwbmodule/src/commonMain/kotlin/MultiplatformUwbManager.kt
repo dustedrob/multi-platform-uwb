@@ -1,6 +1,19 @@
 package com.dustedrob.uwb
 
 /**
+ * Non-fatal lifecycle events of one peer's ranging session. Unlike the error callback these do not
+ * end the session: the platform is still holding it and may deliver results again.
+ */
+enum class SessionEvent {
+    /** The platform paused the session (iOS NI: app backgrounded, or NI juggling several sessions). */
+    Suspended,
+    /** A suspended session is running again. */
+    Resumed,
+    /** The peer stopped answering; the session is still running and the peer may come back. */
+    PeerLost,
+}
+
+/**
  * Platform UWB manager for ranging with nearby peers.
  *
  * Typical flow:
@@ -46,6 +59,13 @@ expect class MultiplatformUwbManager {
      * post-run there).
      */
     fun setSendToPeerCallback(callback: (peerId: String, data: ByteArray) -> Unit)
+
+    /**
+     * Register callback for non-fatal per-peer session events (see [SessionEvent]). The orchestrator
+     * uses these to show a peer as paused rather than failed and, for accessories, to run the
+     * pause/resume handshake over BLE.
+     */
+    fun setSessionEventCallback(callback: (peerId: String, event: SessionEvent) -> Unit)
 
     /**
      * Register callback for errors. [peerId] names the session the error belongs to, or is null for

@@ -7,6 +7,8 @@ enum class DeviceState {
     Discovered,
     ExchangingConfig,
     Ranging,
+    /** Session exists but the platform paused it or the peer stopped answering; may resume. */
+    Suspended,
     Disconnected,
     Error
 }
