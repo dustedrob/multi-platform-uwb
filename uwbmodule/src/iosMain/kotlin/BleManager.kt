@@ -510,6 +510,15 @@ actual class BleManager(
             return
         }
 
+        // An accessory being restarted still has its link open (retained across the stop): re-send
+        // init on it instead of connecting again.
+        accessoryConnections[peerId]?.let { conn ->
+            val initCmd = discoveredPeripherals[peerId]?.profile?.initCommand ?: byteArrayOf(NI_ACCESSORY_INIT_COMMAND)
+            conn.peripheral.writeValue(initCmd.toNSData(), conn.writeChar, CBCharacteristicWriteWithoutResponse)
+            NSLog("BleManager: re-sent accessory init to $peerId on the open link")
+            return
+        }
+
         pendingConfigs[peerId] = connectionConfig
         centralManager?.connectPeripheral(peripheral, null)
         NSLog("BleManager: Connecting to $peerId for config exchange")

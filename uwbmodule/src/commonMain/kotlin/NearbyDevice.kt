@@ -9,6 +9,8 @@ enum class DeviceState {
     Ranging,
     /** Session exists but the platform paused it or the peer stopped answering; may resume. */
     Suspended,
+    /** Session ended; a restart is scheduled or in progress (see [RecoveryPolicy]). */
+    Recovering,
     Disconnected,
     Error
 }

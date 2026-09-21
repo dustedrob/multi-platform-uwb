@@ -293,6 +293,36 @@ deviceDiscoveryManager.startScanning()
 deviceDiscoveryManager.stopScanning()
 ```
 
+### Session recovery and options
+
+Sessions end on their own (the app is backgrounded, the radio hiccups, iOS suspends NearbyInteraction).
+By default the library restarts a peer up to three times with doubling backoff, and also treats a
+peer that reports ranging but delivers nothing for 10 s as ended. Tune or disable this with
+`RecoveryPolicy`, and trigger a restart yourself when you know the cause has cleared (Android ends UWB
+sessions of backgrounded apps, so retries made in the background just use up the attempts):
+
+```kotlin
+val deviceDiscoveryManager = DeviceDiscoveryManager(
+    managerFactory.createUwbManager(),
+    managerFactory.createBleManager(),
+    RecoveryPolicy(autoRecover = true, maxAttempts = 3, backoffMs = 1_000, silentTimeoutMs = 10_000),
+)
+
+// e.g. from the app's foreground callback
+deviceDiscoveryManager.restartFailedPeers()
+```
+
+Devices go through `DeviceState.Recovering` while a restart is pending; `EventType.SessionEnded` and
+`EventType.RecoveryStarted` appear in `events`.
+
+`UwbOptions` on the factory controls iOS camera assistance (used for direction on iPhones without
+direction-capable UWB hardware). Disable it if you only need distance or the camera contention between
+sessions is a problem; it has no effect on Android:
+
+```kotlin
+val managerFactory = ManagerFactory(context, UwbOptions(cameraAssistance = CameraAssistanceMode.Disabled))
+```
+
 ### Integration with UI
 
 ```kotlin

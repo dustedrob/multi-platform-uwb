@@ -28,12 +28,16 @@ import platform.NearbyInteraction.NINearbyObjectRemovalReason
 import platform.NearbyInteraction.NINearbyPeerConfiguration
 import platform.NearbyInteraction.NISession
 import platform.NearbyInteraction.NISessionDelegateProtocol
+import platform.darwin.NSEC_PER_MSEC
 import platform.darwin.NSObject
+import platform.darwin.dispatch_after
 import platform.darwin.dispatch_async
 import platform.darwin.dispatch_get_main_queue
+import platform.darwin.dispatch_time
+import platform.darwin.DISPATCH_TIME_NOW
 
 @OptIn(ExperimentalForeignApi::class)
-actual class MultiplatformUwbManager {
+actual class MultiplatformUwbManager(private val options: UwbOptions = UwbOptions()) {
 
     private var rangingCallback: ((String, Double, Double?, Double?) -> Unit)? = null
     private var errorCallback: ((String?, String) -> Unit)? = null
@@ -103,6 +107,47 @@ actual class MultiplatformUwbManager {
     private fun peerIdFor(session: NISession): String =
         peerSessions.entries.firstOrNull { it.value == session }?.key ?: "unknown"
 
+    /**
+     * Whether to turn on camera assistance for a new configuration: only when the app allows it and
+     * the device lacks direction-capable UWB hardware but can use the camera instead (iOS 16+).
+     */
+    private fun wantsCameraAssistance(): Boolean {
+        if (options.cameraAssistance == CameraAssistanceMode.Disabled) {
+            NSLog("UwbManager: camera assistance disabled by UwbOptions")
+            return false
+        }
+        val caps = NISession.deviceCapabilities
+        if (caps.supportsDirectionMeasurement) {
+            NSLog("UwbManager: device supports direction measurement")
+            return false
+        }
+        NSLog("UwbManager: no direction hardware; camera assistance ${if (caps.supportsCameraAssistance) "available" else "unavailable"}")
+        return caps.supportsCameraAssistance
+    }
+
+    /**
+     * Re-run of a suspended session. Delayed so the camera pipeline (and whatever caused the
+     * suspension, e.g. a screenshot overlay) has settled; an immediate re-run has been seen to leave
+     * NI running but silent (#66). Skipped if the peer was released meanwhile.
+     */
+    private fun resumeLater(peerId: String) {
+        val delay = dispatch_time(DISPATCH_TIME_NOW, (RESUME_DELAY_MS * NSEC_PER_MSEC.toLong()))
+        dispatch_after(delay, dispatch_get_main_queue()) {
+            val session = peerSessions[peerId]
+            val config = peerConfigs[peerId]
+            if (session == null || config == null) {
+                NSLog("UwbManager: $peerId released before resume; not re-running")
+                return@dispatch_after
+            }
+            session.runWithConfiguration(config)
+            sessionEventCallback?.invoke(peerId, SessionEvent.Resumed)
+        }
+    }
+
+    private companion object {
+        const val RESUME_DELAY_MS = 500L
+    }
+
      actual suspend fun initialize() {
         if (!NISession.isSupported()) {
             errorCallback?.invoke(null, "NearbyInteraction not supported on this device")
@@ -167,6 +212,9 @@ actual class MultiplatformUwbManager {
         NSLog("looking for config for $peerId")
         return connectionConfigs[peerId]
     }
+
+    actual suspend fun prepareConnectionConfig(peerId: String, isAccessory: Boolean): UwbSessionConfig? =
+        createConnectionConfig(peerId, isAccessory)
     
     actual suspend fun startRanging(peerId: String, remoteConfig: UwbSessionConfig) {
 
@@ -178,20 +226,8 @@ actual class MultiplatformUwbManager {
                 errorCallback?.invoke(peerId, "Failed to build accessory configuration for $peerId: ${e.message}")
                 return
             }
-            // check for camera assistance in later iOS systems
-            var cameraAssist = false
-            if(!NISession.deviceCapabilities.supportsDirectionMeasurement) {
-                NSLog("MultiPlatformMgr device does not support direction measurement");
-                if (NISession.deviceCapabilities.supportsCameraAssistance) {
-                    NSLog("MultiPlatformMgr device DOES support camera assistance")
-                    config.setCameraAssistanceEnabled(true)
-                    cameraAssist = true
-                } else {
-                    NSLog("MultiPlatformMgr device DOES NOT support camera assistance")
-                }
-            } else {
-                NSLog("MultiPlatformMgr device DOES support direction measurement")
-            }
+            val cameraAssist = wantsCameraAssistance()
+            if (cameraAssist) config.setCameraAssistanceEnabled(true)
             NSLog("UwbManager: Starting accessory ranging with $peerId ")
             val session = peerSessions[peerId]
             if (session == null) {
@@ -235,19 +271,8 @@ actual class MultiplatformUwbManager {
         activePeers[peerId] = peerToken
         // Create a peer configuration with the exchanged token
         val config = NINearbyPeerConfiguration(peerToken)
-        var cameraAssist = false
-        if(!NISession.deviceCapabilities.supportsDirectionMeasurement) {
-            NSLog("MultiPlatformMgr device does not support direction measurement");
-            if (NISession.deviceCapabilities.supportsCameraAssistance) {
-                NSLog("MultiPlatformMgr device DOES support camera assistance")
-                config.setCameraAssistanceEnabled(true)
-                cameraAssist = true
-            } else {
-                NSLog("MultiPlatformMgr device DOES NOT support camera assistance")
-            }
-        } else {
-            NSLog("MultiPlatformMgr device DOES support direction measurement")
-        }
+        val cameraAssist = wantsCameraAssistance()
+        if (cameraAssist) config.setCameraAssistanceEnabled(true)
         NSLog("UwbManager: Starting ranging with $peerId")
         val session = peerSessions[peerId]
         if (session == null) {
@@ -357,10 +382,11 @@ actual class MultiplatformUwbManager {
                 if (didRemoveNearbyObjects.none { it is NINearbyObject }) return@dispatchToMain
                 NSLog("UwbManager: Peer $peerId removed, reason=$withReason")
                 if (withReason == NINearbyObjectRemovalReason.NINearbyObjectRemovalReasonPeerEnded) {
-                    // The peer invalidated its session; ours will never hear from it again.
+                    // The peer invalidated its session; ours will never hear from it again. Not an
+                    // error: the orchestrator may restart with a fresh session and exchange.
                     session.invalidate()
                     forgetPeer(peerId)
-                    errorCallback?.invoke(peerId, "Peer $peerId ended the session")
+                    sessionEventCallback?.invoke(peerId, SessionEvent.Ended)
                 } else {
                     // Timeout: NI stops updating this object but the session is ours to re-run,
                     // which is what Apple recommends. The peer either comes back or ages out.
@@ -374,11 +400,14 @@ actual class MultiplatformUwbManager {
         override fun session(session: NISession, didInvalidateWithError: NSError) {
             dispatchToMain {
                 val msg = didInvalidateWithError.localizedDescription
-                // Only this peer's session died; the others keep ranging.
+                // Only this peer's session died; the others keep ranging. An invalidated session is
+                // gone for good, so this is reported as Ended and the orchestrator decides whether a
+                // fresh session is worth trying (bounded by RecoveryPolicy, so a permanent cause such
+                // as denied permission still settles into Error).
                 val peerId = peerIdFor(session)
                 NSLog("UwbManager: Session invalidated for $peerId: $msg")
-                errorCallback?.invoke(peerId, "NI Session error: $msg")
                 forgetPeer(peerId)
+                sessionEventCallback?.invoke(peerId, SessionEvent.Ended)
             }
         }
 
@@ -454,12 +483,8 @@ actual class MultiplatformUwbManager {
             NSLog("UwbManager: Session suspension ended for $peerId")
             // NI does not resume by itself; the session has to be run with its configuration again.
             // For an accessory that produces fresh shareable configuration data, which restarts it.
-            val config = peerConfigs[peerId]
-            if (config != null) {
-                session.runWithConfiguration(config)
-                dispatchToMain {
-                    sessionEventCallback?.invoke(peerId, SessionEvent.Resumed)
-                }
+            if (peerConfigs[peerId] != null) {
+                resumeLater(peerId)
             } else {
                 NSLog("UwbManager: No stored configuration for $peerId; cannot resume")
             }

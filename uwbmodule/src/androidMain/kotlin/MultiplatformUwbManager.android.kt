@@ -23,13 +23,20 @@ import kotlinx.coroutines.runBlocking
 import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
 
-actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? = null) {
+actual class MultiplatformUwbManager(
+    private val androidUwbManager: UwbManager? = null,
+    /** Accepted for parity with iOS; camera assistance is a NearbyInteraction concept. */
+    @Suppress("unused") private val options: UwbOptions = UwbOptions(),
+) {
     private val TAG = "UwbManager"
 
     private var rangingCallback: ((String, Double, Double?, Double?) -> Unit)? = null
     private var errorCallback: ((String?, String) -> Unit)? = null
 
-    /** Stored for `expect` parity; androidx.core.uwb has no suspend/resume, so nothing emits yet. */
+    /**
+     * androidx.core.uwb has no suspend/resume, so only [SessionEvent.Ended] is emitted here, when GMS
+     * ends a session on its own.
+     */
     private var sessionEventCallback: ((String, SessionEvent) -> Unit)? = null
 
     /**
@@ -112,7 +119,7 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
     actual fun createConnectionConfig(peerId: String, isAccessory: Boolean ): UwbSessionConfig? =
         connectionConfigs[peerId] ?: runBlocking { prepareConnectionConfig(peerId, isAccessory) }
 
-    suspend fun prepareConnectionConfig(peerId: String, isAccessory: Boolean): UwbSessionConfig? {
+    actual suspend fun prepareConnectionConfig(peerId: String, isAccessory: Boolean): UwbSessionConfig? {
         // One config per peer: a repeat discovery must not regenerate the session key mid-exchange,
         // or the copy we already advertised over BLE would no longer match what we range with.
         connectionConfigs[peerId]?.let { return it }
@@ -273,13 +280,14 @@ actual class MultiplatformUwbManager(private val androidUwbManager: UwbManager? 
 
                             is RangingResult.RangingResultPeerDisconnected -> {
                                 // GMS routes every session end through here, including failed to
-                                // start and bad parameters, not only a peer walking away. The flow
-                                // itself never completes, so releasePeer cancels this collector to
-                                // close the HW session. The scope's address is retired with it; a
-                                // re-discovery must mint a fresh scope and config.
+                                // start, bad parameters and the app being backgrounded, not only a
+                                // peer walking away. The flow itself never completes, so releasePeer
+                                // cancels this collector to close the HW session. The scope's address
+                                // is retired with it; a restart must mint a fresh scope and config,
+                                // which is why this is reported as Ended, not as an error.
                                 Log.d(TAG,"ranging ended for ${peerId}")
-                                errorCallback?.invoke(peerId, "Ranging ended for $peerId (peer disconnected or failed to start)")
                                 releasePeer(peerId)
+                                sessionEventCallback?.invoke(peerId, SessionEvent.Ended)
                             }
 
                             else ->{
