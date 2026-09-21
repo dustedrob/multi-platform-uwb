@@ -54,16 +54,12 @@ actual class BleManager(
     private fun deliverRemoteConfig(peerId: String, bytes: ByteArray?) {
         val remoteConfig = bytes?.let { UwbSessionConfig.fromByteArray(it, false) }
         if (remoteConfig != null) {
-            val connectionLocalConfig=uwbManager.getConnectionConfig(peerId)
-            if(connectionLocalConfig != null){
-                val rangingRemoteConfig=if(remoteConfig.isOlder(connectionLocalConfig)){
-                     remoteConfig
-                }
-                else {
-                     connectionLocalConfig.copy(uwbAddress= remoteConfig.uwbAddress)
-                }
+            if (uwbManager.getConnectionConfig(peerId) != null) {
+                // Pass the peer's config through unchanged, as Android does. The old timestamp
+                // election handed the *newer* side its own config (its own discovery token), so that
+                // iPhone tried to range against itself and iPhone-to-iPhone never started (#66).
                 NSLog("received config from $peerId")
-                configExchangedCallback?.invoke(peerId, rangingRemoteConfig)
+                configExchangedCallback?.invoke(peerId, remoteConfig)
             }
         } else {
             NSLog("BleManager: failed to parse config from $peerId")
@@ -370,13 +366,12 @@ actual class BleManager(
                 didReceiveReadRequest.characteristic.UUID == CBUUID.UUIDWithString(it.readFromUuid!!)
             }
             if (isReadChar) {
-                val peerId = didReceiveReadRequest.central.identifier.UUIDString                
-                var connectionLocalConfig:UwbSessionConfig?=uwbManager.getConnectionConfig(peerId)
-                    /*connectionLocalConfig = if(connectionLocalConfig==null){
-                           uwbManager.createConnectionConfig(peerId,false)
-                   } else {
-                           connectionLocalConfig
-                   }*/
+                val peerId = didReceiveReadRequest.central.identifier.UUIDString
+                // A central can read before our scan has seen it (the same device has one UUID in both
+                // roles), so mint its config on demand rather than answer with 0 bytes, as the Android
+                // server does.
+                val connectionLocalConfig = uwbManager.getConnectionConfig(peerId)
+                    ?: uwbManager.createConnectionConfig(peerId, false)
                 val configBytes = connectionLocalConfig?.toByteArray() ?: ByteArray(0)
                 val offset = didReceiveReadRequest.offset.toInt()
                 if (offset < configBytes.size) {
