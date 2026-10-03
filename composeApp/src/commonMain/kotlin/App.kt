@@ -190,6 +190,7 @@ private fun DeviceItem(device: NearbyDevice) {
         DeviceState.ExchangingConfig -> Color(0xFFFFC107) // yellow
         DeviceState.Ranging -> Color(0xFF4CAF50) // green
         DeviceState.Suspended -> Color(0xFFFF9800) // orange
+        DeviceState.Recovering -> Color(0xFF03A9F4) // light blue
         DeviceState.Disconnected -> Color.Gray
         DeviceState.Error -> Color.Red
     }

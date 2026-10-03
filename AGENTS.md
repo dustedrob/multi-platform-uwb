@@ -92,9 +92,18 @@ composeApp (sample)          uwbmodule (library, package com.dustedrob.uwb)
   randomized addresses). `identityKeyToPeer` + `connectionScore` make both phones pick the same
   connection. Accessories are identified by UWB address instead. iOS peers need none of this (CoreBluetooth
   UUIDs are stable).
-- **Suspend/resume are `SessionEvent`s, not errors** (iOS NI suspends when backgrounded or juggling
-  sessions). Accessories get a BLE STOP on suspend with the link retained
-  (`retainAccessoryLink`) so the re-run's configure-and-start reaches them.
+- **Suspend/resume/end are `SessionEvent`s, not errors** (iOS NI suspends when backgrounded or
+  juggling sessions; Android GMS ends sessions outright, including for a backgrounded app). Accessories
+  get a BLE STOP on suspend with the link retained (`retainAccessoryLink`) so the re-run's
+  configure-and-start reaches them. The platform managers only report; `RecoveryPolicy` in the
+  orchestrator decides what to do.
+- **A restart is release + re-exchange, never an in-place resume.** On `Ended` (or when the silence
+  watchdog sees a `Ranging` peer with no results for `silentTimeoutMs`) the orchestrator drops the
+  platform session and pushes the peer back through discovery → exchange → ranging: phones are
+  forgotten at the BLE layer so the next advertisement starts a fresh exchange; accessories keep their
+  link and get INIT again. Bounded by `maxAttempts` with doubling backoff; the app can force one with
+  `restartPeer` / `restartFailedPeers` (e.g. on foreground). Keep new recovery logic in
+  `RecoveryTracker` so it stays testable.
 - **`enableAndroidAccessoryProtocol` is off by default and Android-only.** iOS accessory ranging is
   Apple's standard protocol and always on when an accessory profile is present.
 - **Wire format is little-endian** with optional trailers (`UwbSessionConfig.toByteArray`), so accessory

@@ -485,6 +485,17 @@ actual class BleManager(
         }
         val profile: UwbProfile? = discoveredDevices[peerId]?.profile
 
+        // An accessory being restarted still has its link open (retained across the stop): re-send
+        // init on it instead of opening a second GATT connection to the same device.
+        accessoryConnections[peerId]?.let { conn ->
+            val initCmd = profile?.initCommand ?: byteArrayOf(ANDROID_ACCESSORY_INIT_COMMAND)
+            conn.queue.enqueue(
+                BleCommand.WriteCharacteristic(conn.writeChar, initCmd, BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE)
+            )
+            Log.d(TAG, "GATT client: re-sent accessory init to $peerId on the open link")
+            return
+        }
+
         // Serializes GATT writes for this connection; created on service discovery.
         var queue: BleQueueManager? = null
 

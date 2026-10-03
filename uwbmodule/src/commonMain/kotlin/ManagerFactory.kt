@@ -8,6 +8,9 @@ package com.dustedrob.uwb
  * iOS `CBCentralManager`).
  */
 expect class ManagerFactory {
+    /** Options for the shared [MultiplatformUwbManager] this factory hands out. */
+    val options: UwbOptions
+
     /** Create a platform-specific [MultiplatformUwbManager] for UWB ranging. */
     fun createUwbManager(): MultiplatformUwbManager
 
