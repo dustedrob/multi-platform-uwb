@@ -4,6 +4,7 @@ import com.dustedrob.uwb.DiscoveryEvent
 import com.dustedrob.uwb.LOCAL_PROFILE
 import com.dustedrob.uwb.ManagerFactory
 import com.dustedrob.uwb.NearbyDevice
+import com.dustedrob.uwb.RecoveryPolicy
 import com.dustedrob.uwb.UwbSessionConfig
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -42,7 +43,11 @@ class UwbDiscoveryViewModel(
                 // standard protocol whether or not this is set.
                 enableAndroidAccessoryProtocol = true,
             )
-        )
+        ),
+        // Defaults, spelled out so the knobs are visible in the sample: a session that ends on its
+        // own is restarted up to three times with doubling backoff, and a peer that claims to be
+        // ranging but reports nothing for 10 s is treated as ended.
+        RecoveryPolicy(),
     )
     var permissionState by mutableStateOf(PermissionState.NotDetermined)
         private set
@@ -124,6 +129,21 @@ class UwbDiscoveryViewModel(
 
     private suspend fun stopUwbScanning() {
         deviceDiscoveryManager.stopScanning()
+    }
+
+    /** Restart one peer's session now, e.g. from a retry button on a failed device. */
+    fun retryDevice(peerId: String) {
+        viewModelScope.launch { deviceDiscoveryManager.restartPeer(peerId) }
+    }
+
+    /**
+     * Give every failed peer another go. Called when the app comes back to the foreground: Android
+     * ends the UWB sessions of a backgrounded app, so those peers have usually spent their automatic
+     * attempts on retries that could never succeed while we were in the background.
+     */
+    fun onForeground() {
+        if (!_isScanning.value) return
+        viewModelScope.launch { deviceDiscoveryManager.restartFailedPeers() }
     }
 
     override fun onCleared() {
