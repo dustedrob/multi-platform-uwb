@@ -25,6 +25,10 @@ enum class EventType {
     ConfigExchangeComplete,
     RangingStarted,
     RangingUpdate,
+    /** A session ended on its own (not via stopScanning); see [RecoveryPolicy]. */
+    SessionEnded,
+    /** A restart of the peer's session was scheduled. */
+    RecoveryStarted,
     Error
 }
 
@@ -50,7 +54,8 @@ data class DiscoveryEvent(
  */
 class DeviceDiscoveryManager(
     private val multiplatformUwbManager: MultiplatformUwbManager,
-    private val bleManager: BleManager
+    private val bleManager: BleManager,
+    private val recovery: RecoveryPolicy = RecoveryPolicy(),
 ) {
     private val _nearbyDevices = MutableStateFlow<List<NearbyDevice>>(emptyList())
     val nearbyDevices: Flow<List<NearbyDevice>> = _nearbyDevices.asStateFlow()
@@ -90,6 +95,15 @@ class DeviceDiscoveryManager(
      * on iOS, where the CoreBluetooth UUID is already stable and the config carries no key.
      */
     private val identityKeyToPeer = mutableMapOf<String, PeerBinding>()
+
+    /** Restart attempt bookkeeping per peer (see [RecoveryPolicy]). Guarded by [mutex]. */
+    private val recoveryTracker = RecoveryTracker(recovery)
+
+    /** Pending delayed restarts, so stopScanning can cancel them. Guarded by [mutex]. */
+    private val restartJobs = mutableMapOf<String, Job>()
+
+    /** Peers whose restart hasn't produced a ranging result yet; the first one resets their attempts. */
+    private val recoveringPeers = mutableSetOf<String>()
 
     companion object {
         /** Devices not seen within this window are considered stale and removed. */
@@ -193,9 +207,15 @@ class DeviceDiscoveryManager(
         if (!isScanning) return
         isScanning = false
 
-        // Stop stale device cleanup
+        // Stop stale device cleanup and any restarts still waiting on their backoff
         cleanupJob?.cancel()
         cleanupJob = null
+        mutex.withLock {
+            restartJobs.values.forEach { it.cancel() }
+            restartJobs.clear()
+            recoveringPeers.clear()
+            recoveryTracker.clear()
+        }
 
         // Stop BLE
         bleManager.stopScanning()
@@ -232,28 +252,39 @@ class DeviceDiscoveryManager(
     }
 
     private suspend fun removeStaleDevices() {
-        val stale = mutex.withLock {
+        val (stale, silent) = mutex.withLock {
             val now = getCurrentTimeMillis()
             val currentDevices = _nearbyDevices.value
+            // A Recovering peer is waiting on its backoff, and a Ranging one is watched for silence
+            // below, so neither is purged here.
             val (stale, active) = currentDevices.partition { device ->
                 val threshold = if (device.state == DeviceState.Suspended) SUSPENDED_THRESHOLD_MS else STALE_THRESHOLD_MS
-                device.state != DeviceState.Ranging && (now - device.lastSeen) > threshold
+                device.state != DeviceState.Ranging && device.state != DeviceState.Recovering &&
+                    (now - device.lastSeen) > threshold
             }
             stale.forEach { device ->
                 pendingExchanges.remove(device.id)
                 exchangedPeers.remove(device.id)
                 accessoryPeers.remove(device.id)
                 identityKeyToPeer.entries.removeAll { it.value.peerId == device.id }
+                recoveringPeers.remove(device.id)
+                recoveryTracker.reset(device.id)
                 emitEvent(EventType.Error, device.id, "Device stale, removed: ${device.name}")
             }
             if (stale.isNotEmpty()) _nearbyDevices.value = active
-            stale
+            // Silence watchdog: the platform can hold a session it calls running while delivering
+            // nothing (iOS after a suspension, NaN-only updates). Treat that as an ended session.
+            stale to RecoveryTracker.silentPeers(active, now, recovery.silentTimeoutMs)
         }
         // Actually let go of the peer: release its session (a purged entry would otherwise keep a
         // live session no one can stop) and the BLE cache entry, so it can be discovered again.
         stale.forEach { device ->
             multiplatformUwbManager.stopRanging(device.id)
             bleManager.forgetDevice(device.id)
+        }
+        silent.forEach { device ->
+            multiplatformUwbManager.stopRanging(device.id)
+            onSessionEnded(device.id, "No ranging results for ${recovery.silentTimeoutMs} ms")
         }
     }
 
@@ -271,6 +302,10 @@ class DeviceDiscoveryManager(
      * session is suspended, over a BLE link that stays open for the resume.
      */
     internal suspend fun onSessionEvent(peerId: String, event: SessionEvent) {
+        if (event == SessionEvent.Ended) {
+            onSessionEnded(peerId, "Session ended")
+            return
+        }
         val isAccessory = mutex.withLock {
             val now = getCurrentTimeMillis()
             val devices = _nearbyDevices.value.toMutableList()
@@ -288,6 +323,114 @@ class DeviceDiscoveryManager(
             bleManager.retainAccessoryLink(peerId)
             bleManager.sendToPeer(peerId, byteArrayOf(NI_ACCESSORY_STOP))
         }
+    }
+
+    /**
+     * A session is gone (platform said so, or the silence watchdog did) and the manager has already
+     * released it. Either schedule a restart after the policy's backoff or mark the peer failed.
+     */
+    private suspend fun onSessionEnded(peerId: String, reason: String) {
+        val delayMs = mutex.withLock {
+            val devices = _nearbyDevices.value
+            val idx = devices.indexOfFirst { it.id == peerId }
+            if (idx == -1 || devices[idx].state == DeviceState.Recovering || devices[idx].state == DeviceState.Error) {
+                return
+            }
+            emitEvent(EventType.SessionEnded, peerId, reason)
+            when (val decision = recoveryTracker.onEnded(peerId)) {
+                is RecoveryDecision.Retry -> {
+                    recoveringPeers.add(peerId)
+                    updateDeviceStateLocked(peerId, DeviceState.Recovering)
+                    emitEvent(
+                        EventType.RecoveryStarted, peerId,
+                        "Restart ${decision.attempt}/${recovery.maxAttempts} in ${decision.delayMs} ms"
+                    )
+                    decision.delayMs
+                }
+                RecoveryDecision.GiveUp -> {
+                    updateDeviceStateLocked(peerId, DeviceState.Error, reason)
+                    return
+                }
+            }
+        }
+        scheduleRestart(peerId, delayMs)
+    }
+
+    private suspend fun scheduleRestart(peerId: String, delayMs: Long) {
+        val job = scope.launch {
+            delay(delayMs)
+            restart(peerId)
+        }
+        mutex.withLock {
+            restartJobs.remove(peerId)?.cancel()
+            restartJobs[peerId] = job
+        }
+    }
+
+    /**
+     * Push [peerId] back through discovery → exchange → ranging. A phone is forgotten at the BLE layer
+     * so its next advertisement starts a fresh exchange (both ends do this independently, and the
+     * identity dedup settles them on one connection). An accessory keeps its BLE link: its session is
+     * released, a fresh local config is minted, and init is sent again over the open link, which yields
+     * fresh accessory config data and a fresh session on both sides.
+     */
+    private suspend fun restart(peerId: String) {
+        val isAccessory = mutex.withLock {
+            restartJobs.remove(peerId)
+            if (_nearbyDevices.value.none { it.id == peerId }) return
+            exchangedPeers.remove(peerId)
+            pendingExchanges.remove(peerId)
+            identityKeyToPeer.entries.removeAll { it.value.peerId == peerId }
+            // Back to Discovered with a fresh lastSeen: the peer was silent for a while, and the
+            // stale purge must give the re-discovery its full window.
+            updateDeviceStateLocked(peerId, DeviceState.Discovered, touch = true)
+            peerId in accessoryPeers
+        }
+        if (isAccessory) {
+            // Same handshake as a suspension: tell the accessory to stop but keep the link for the
+            // re-init. The stop is harmless if the accessory already ended on its side.
+            bleManager.retainAccessoryLink(peerId)
+            bleManager.sendToPeer(peerId, byteArrayOf(NI_ACCESSORY_STOP))
+            multiplatformUwbManager.stopRanging(peerId)
+            val config = multiplatformUwbManager.prepareConnectionConfig(peerId, isAccessory = true)
+            if (config == null) {
+                onRangingError(peerId, "Could not prepare a UWB config for restart")
+                return
+            }
+            mutex.withLock {
+                pendingExchanges.add(peerId)
+                updateDeviceStateLocked(peerId, DeviceState.ExchangingConfig, touch = true)
+            }
+            emitEvent(EventType.ConfigExchangeStarted, peerId, "Re-initializing accessory")
+            bleManager.connectAndExchangeConfig(peerId, config)
+        } else {
+            multiplatformUwbManager.stopRanging(peerId)
+            bleManager.forgetDevice(peerId)
+            emitEvent(EventType.DeviceDiscovered, peerId, "Waiting for re-discovery")
+        }
+    }
+
+    /** Restart [peerId] now, resetting its attempt count. For the app's own recovery triggers. */
+    suspend fun restartPeer(peerId: String) {
+        mutex.withLock {
+            if (_nearbyDevices.value.none { it.id == peerId }) return
+            recoveryTracker.reset(peerId)
+            recoveringPeers.add(peerId)
+            restartJobs.remove(peerId)?.cancel()
+            updateDeviceStateLocked(peerId, DeviceState.Recovering)
+            emitEvent(EventType.RecoveryStarted, peerId, "Restart requested")
+        }
+        restart(peerId)
+    }
+
+    /**
+     * Restart every peer in [DeviceState.Error]. Meant for the app to call when it knows a failure
+     * cause has cleared, e.g. on returning to the foreground (Android ends UWB sessions of
+     * backgrounded apps, so retries made while backgrounded just use up the attempts).
+     */
+    suspend fun restartFailedPeers() {
+        val failed = mutex.withLock { _nearbyDevices.value.filter { it.state == DeviceState.Error }.map { it.id } }
+        failed.forEach { restartPeer(it) }
     }
 
     private fun emitEvent(type: EventType, peerId: String, message: String) {
@@ -381,10 +524,13 @@ class DeviceDiscoveryManager(
             val existingDevices = _nearbyDevices.value.toMutableList()
             val idx = existingDevices.indexOfFirst { it.id == peerId }
             if (idx != -1) {
+                // A fresh session starts its silence window now, not from the last result of the
+                // session it replaces.
                 existingDevices[idx] = existingDevices[idx].copy(
                     state = DeviceState.Ranging,
                     sessionId = remoteConfig.sessionId,
-                    channel = remoteConfig.channel
+                    channel = remoteConfig.channel,
+                    lastSeen = getCurrentTimeMillis(),
                 )
             } else {
                 existingDevices.add(
@@ -418,8 +564,9 @@ class DeviceDiscoveryManager(
         val existingDevices = _nearbyDevices.value.toMutableList()
         val deviceIndex = existingDevices.indexOfFirst { it.id == peerId }
 
-        if (deviceIndex != -1) {                        
-            existingDevices[deviceIndex] = existingDevices[deviceIndex].copy(                
+        if (deviceIndex != -1) {
+            if (recoveringPeers.remove(peerId)) recoveryTracker.onRecovered(peerId)
+            existingDevices[deviceIndex] = existingDevices[deviceIndex].copy(
                 distance = distance,
                 azimuth = azimuth,
                 elevation = elevation,
@@ -430,12 +577,13 @@ class DeviceDiscoveryManager(
         }
     }
 
-    /** Must be called while holding [mutex]. */
-    private fun updateDeviceStateLocked(id: String, state: DeviceState, error: String? = null) {
+    /** Must be called while holding [mutex]. [touch] also refreshes [NearbyDevice.lastSeen]. */
+    private fun updateDeviceStateLocked(id: String, state: DeviceState, error: String? = null, touch: Boolean = false) {
         val devices = _nearbyDevices.value.toMutableList()
         val idx = devices.indexOfFirst { it.id == id }
         if (idx != -1) {
-            devices[idx] = devices[idx].copy(state = state, errorMessage = error)
+            val lastSeen = if (touch) getCurrentTimeMillis() else devices[idx].lastSeen
+            devices[idx] = devices[idx].copy(state = state, errorMessage = error, lastSeen = lastSeen)
             _nearbyDevices.value = devices
         }
     }

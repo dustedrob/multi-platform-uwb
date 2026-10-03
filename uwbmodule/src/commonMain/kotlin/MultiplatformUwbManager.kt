@@ -11,7 +11,27 @@ enum class SessionEvent {
     Resumed,
     /** The peer stopped answering; the session is still running and the peer may come back. */
     PeerLost,
+    /**
+     * The platform session is gone and cannot be resumed in place (Android: GMS ended the session,
+     * which it also does for a backgrounded app; iOS: NI invalidated it or the peer ended it). The
+     * manager has already released the peer; the orchestrator decides whether to restart it via
+     * [RecoveryPolicy].
+     */
+    Ended,
 }
+
+/** Whether iOS NearbyInteraction may use the camera to derive direction. No effect on Android. */
+enum class CameraAssistanceMode {
+    /** Enable camera assistance when the device has no direction-capable UWB hardware (iOS 16+). */
+    Auto,
+    /** Never enable it: distance only on such devices, but no camera contention between sessions. */
+    Disabled,
+}
+
+/** Platform UWB options, passed to [ManagerFactory]. */
+data class UwbOptions(
+    val cameraAssistance: CameraAssistanceMode = CameraAssistanceMode.Auto,
+)
 
 /**
  * Platform UWB manager for ranging with nearby peers.
@@ -36,6 +56,13 @@ expect class MultiplatformUwbManager {
 
     fun createConnectionConfig(peerId:String, isAccessory:Boolean): UwbSessionConfig?
     fun getConnectionConfig(peerId: String): UwbSessionConfig?
+
+    /**
+     * Suspending form of [createConnectionConfig]: mint (or return the existing) local config for
+     * [peerId]. Used by the orchestrator when restarting an accessory whose session was released, so a
+     * fresh scope/session exists before the accessory is re-initialized over the retained BLE link.
+     */
+    suspend fun prepareConnectionConfig(peerId: String, isAccessory: Boolean): UwbSessionConfig?
     /**
      * Start ranging with a peer using exchanged configurations.
      *
