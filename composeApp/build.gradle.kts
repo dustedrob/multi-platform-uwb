@@ -43,6 +43,7 @@ kotlin {
             implementation(compose.components.resources)
             implementation(compose.components.uiToolingPreview)
             implementation(libs.lifecycle.viewmodel)
+            implementation(libs.lifecycle.runtime.compose)
             implementation(libs.navigation.compose)
             implementation(project(":uwbmodule"))
         }

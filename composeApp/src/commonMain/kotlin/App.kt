@@ -29,6 +29,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -64,6 +66,11 @@ fun App() {
     val viewModel: UwbDiscoveryViewModel = viewModel {
         UwbDiscoveryViewModel(controller, managerFactory)
     }
+    // Android ends the UWB sessions of a backgrounded app, so peers that failed while we were away
+    // get a fresh set of attempts once we are back. The library stays lifecycle-free on purpose; this
+    // is the hook an app is expected to provide.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.onForeground() }
+
     val isScanning by viewModel.isScanning.collectAsState()
     val nearbyDevices by viewModel.nearbyDevices.collectAsState()
     val connectionEvents by viewModel.connectionEvents.collectAsState()
@@ -108,7 +115,7 @@ fun App() {
             modifier = Modifier.fillMaxWidth().weight(1f)
         ) {
             items(nearbyDevices, key = { it.id }) { device ->
-                DeviceItem(device)
+                DeviceItem(device, onRetry = { viewModel.retryDevice(device.id) })
             }
             if (nearbyDevices.isEmpty() && isScanning) {
                 item {
@@ -184,7 +191,7 @@ private fun LocalDeviceInfo(config: UwbSessionConfig?, isScanning: Boolean) {
 }
 
 @Composable
-private fun DeviceItem(device: NearbyDevice) {
+private fun DeviceItem(device: NearbyDevice, onRetry: () -> Unit = {}) {
     val stateColor = when (device.state) {
         DeviceState.Discovered -> Color.Gray
         DeviceState.ExchangingConfig -> Color(0xFFFFC107) // yellow
@@ -238,9 +245,20 @@ private fun DeviceItem(device: NearbyDevice) {
                         color = Color.Red
                     )
                 }
+                if (device.state == DeviceState.Recovering) {
+                    Text(
+                        text = "Restarting session…",
+                        style = MaterialTheme.typography.caption,
+                        color = Color(0xFF03A9F4)
+                    )
+                }
             }
 
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                // The automatic restarts are bounded, so a peer that used them all up needs a nudge.
+                if (device.state == DeviceState.Error) {
+                    TextButton(onClick = onRetry) { Text("Retry") }
+                }
                 if (device.state == DeviceState.Ranging) {
                     DirectionArrow(
                         azimuthDeg = device.azimuth,
@@ -320,6 +338,8 @@ private fun EventLogItem(event: DiscoveryEvent) {
         EventType.Error -> Color.Red
         EventType.RangingStarted -> Color(0xFF4CAF50)
         EventType.ConfigExchangeComplete -> Color(0xFF2196F3)
+        EventType.SessionEnded -> Color(0xFFFF9800) // orange
+        EventType.RecoveryStarted -> Color(0xFF03A9F4) // light blue
         else -> Color.DarkGray
     }
     // Simple time display: seconds since midnight-ish
@@ -400,7 +420,18 @@ private fun DeviceItemPreview() {
                 state = DeviceState.Discovered,
             )
         )
-        // Error state
+        // Session ended, restart pending
+        DeviceItem(
+            NearbyDevice(
+                id = "AB:CD:EF:12:34:56",
+                name = "Pixel 9",
+                distance = 2.1,
+                state = DeviceState.Recovering,
+                sessionId = 11,
+                channel = 9,
+            )
+        )
+        // Error state, out of automatic attempts
         DeviceItem(
             NearbyDevice(
                 id = "DE:AD:BE:EF:00:11",
@@ -436,6 +467,8 @@ private fun EventLogItemPreview() {
         EventLogItem(DiscoveryEvent(0L, EventType.DeviceDiscovered, "peer", "Discovered nearby device"))
         EventLogItem(DiscoveryEvent(0L, EventType.RangingStarted, "peer", "Ranging started"))
         EventLogItem(DiscoveryEvent(0L, EventType.ConfigExchangeComplete, "peer", "Config exchange complete"))
+        EventLogItem(DiscoveryEvent(0L, EventType.SessionEnded, "peer", "Session ended"))
+        EventLogItem(DiscoveryEvent(0L, EventType.RecoveryStarted, "peer", "Restart 1/3 in 1000 ms"))
         EventLogItem(DiscoveryEvent(0L, EventType.Error, "peer", "Something went wrong"))
     }
 }

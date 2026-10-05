@@ -310,7 +310,14 @@ val deviceDiscoveryManager = DeviceDiscoveryManager(
 
 // e.g. from the app's foreground callback
 deviceDiscoveryManager.restartFailedPeers()
+
+// or one peer, from a retry button
+deviceDiscoveryManager.restartPeer(peerId)
 ```
+
+The sample app does both: `App.kt` calls `restartFailedPeers()` from a `LifecycleEventEffect` on
+`ON_RESUME`, and a device in `DeviceState.Error` gets a Retry button. The library itself observes no
+lifecycle, so this hook is the app's to provide.
 
 Devices go through `DeviceState.Recovering` while a restart is pending; `EventType.SessionEnded` and
 `EventType.RecoveryStarted` appear in `events`.
