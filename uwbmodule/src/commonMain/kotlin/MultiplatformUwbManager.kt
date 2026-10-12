@@ -34,6 +34,22 @@ data class UwbOptions(
 )
 
 /**
+ * Camera-assistance policy, kept here as a pure function so it is unit-testable (the iOS manager it
+ * serves is platform code). Camera assistance only earns its cost when the device cannot measure
+ * direction in hardware but can derive it from the camera, so a device with a direction-capable
+ * radio never pays for it.
+ */
+internal fun shouldUseCameraAssistance(
+    mode: CameraAssistanceMode,
+    supportsDirectionMeasurement: Boolean,
+    supportsCameraAssistance: Boolean,
+): Boolean = when {
+    mode == CameraAssistanceMode.Disabled -> false
+    supportsDirectionMeasurement -> false
+    else -> supportsCameraAssistance
+}
+
+/**
  * Platform UWB manager for ranging with nearby peers.
  *
  * Typical flow:
