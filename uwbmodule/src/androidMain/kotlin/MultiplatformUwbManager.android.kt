@@ -30,7 +30,7 @@ actual class MultiplatformUwbManager(
 ) {
     private val TAG = "UwbManager"
 
-    private var rangingCallback: ((String, Double, Double?, Double?) -> Unit)? = null
+    private var rangingCallback: ((String, Double, Double?, Double?, VerticalDirection?) -> Unit)? = null
     private var errorCallback: ((String?, String) -> Unit)? = null
 
     /**
@@ -269,7 +269,10 @@ actual class MultiplatformUwbManager(
                                         peerId,
                                         distance.toDouble(),
                                         result.position.azimuth?.value?.toDouble(),
-                                        result.position.elevation?.value?.toDouble()
+                                        result.position.elevation?.value?.toDouble(),
+                                        // Android reports a real elevation angle, so the coarse
+                                        // above/below category stays unused here.
+                                        null,
                                     )
                                 }
                             }
@@ -329,7 +332,15 @@ actual class MultiplatformUwbManager(
         connectionConfigs.remove(peerId)
     }
 
-    actual fun setRangingCallback(callback: (peerId: String, distance: Double, azimuth: Double?, elevation: Double?) -> Unit) {
+    actual fun setRangingCallback(
+        callback: (
+            peerId: String,
+            distance: Double,
+            azimuth: Double?,
+            elevation: Double?,
+            verticalDirection: VerticalDirection?,
+        ) -> Unit
+    ) {
         rangingCallback = callback
     }
 

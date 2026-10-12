@@ -51,6 +51,7 @@ import com.dustedrob.uwb.DiscoveryEvent
 import com.dustedrob.uwb.EventType
 import com.dustedrob.uwb.NearbyDevice
 import com.dustedrob.uwb.UwbSessionConfig
+import com.dustedrob.uwb.VerticalDirection
 import dev.icerock.moko.permissions.PermissionState
 import dev.icerock.moko.permissions.compose.BindEffect
 import dev.icerock.moko.permissions.compose.rememberPermissionsControllerFactory
@@ -268,6 +269,16 @@ private fun DeviceItem(device: NearbyDevice, onRetry: () -> Unit = {}) {
                         elevationDeg = device.elevation,
                         modifier = Modifier.size(48.dp)
                     )
+                    // A camera-assisted iOS session has no elevation angle, only this category, so
+                    // the arrow can't show it: say it in words instead.
+                    val vertical = device.verticalDirection
+                    if (device.elevation == null && vertical != null) {
+                        Text(
+                            text = verticalLabel(vertical),
+                            style = MaterialTheme.typography.caption,
+                            color = Color.Gray
+                        )
+                    }
                 }
                 val dist = device.distance
                 if (dist != null) {
@@ -280,6 +291,13 @@ private fun DeviceItem(device: NearbyDevice, onRetry: () -> Unit = {}) {
             }
         }
     }
+}
+
+private fun verticalLabel(vertical: VerticalDirection): String = when (vertical) {
+    VerticalDirection.Same -> "level"
+    VerticalDirection.Above -> "above"
+    VerticalDirection.Below -> "below"
+    VerticalDirection.AboveOrBelow -> "off level"
 }
 
 /** Trims a distance in meters to 2 decimal places without pulling in platform formatting. */
@@ -412,6 +430,20 @@ private fun DeviceItemPreview() {
                 elevation = null,
                 state = DeviceState.Ranging,
                 sessionId = 7,
+                channel = 9,
+            )
+        )
+        // Camera-assisted iOS: azimuth but only a vertical category
+        DeviceItem(
+            NearbyDevice(
+                id = "C0:FF:EE:00:11:22",
+                name = "iPhone SE",
+                distance = 2.1,
+                azimuth = -20.0,
+                elevation = null,
+                verticalDirection = VerticalDirection.Above,
+                state = DeviceState.Ranging,
+                sessionId = 9,
                 channel = 9,
             )
         )

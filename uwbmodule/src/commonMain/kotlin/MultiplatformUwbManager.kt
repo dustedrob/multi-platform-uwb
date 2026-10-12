@@ -90,8 +90,19 @@ expect class MultiplatformUwbManager {
     /** Stop ranging with the given peer. */
     suspend fun stopRanging(peerId: String)
 
-    /** Register callback for ranging distance updates. */
-    fun setRangingCallback(callback: (peerId: String, distance: Double, azimuth: Double?, elevation: Double?) -> Unit)
+    /**
+     * Register callback for ranging updates. [elevation] and [verticalDirection] are the two
+     * shapes a platform can report vertical information in; at most one is non-null.
+     */
+    fun setRangingCallback(
+        callback: (
+            peerId: String,
+            distance: Double,
+            azimuth: Double?,
+            elevation: Double?,
+            verticalDirection: VerticalDirection?,
+        ) -> Unit
+    )
 
     /**
      * Register the outbound channel used to send data back to a peer over BLE.
