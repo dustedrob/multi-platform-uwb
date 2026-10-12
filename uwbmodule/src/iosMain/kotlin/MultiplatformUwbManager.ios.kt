@@ -26,6 +26,10 @@ import platform.NearbyInteraction.NIDiscoveryToken
 import platform.NearbyInteraction.NINearbyAccessoryConfiguration
 import platform.NearbyInteraction.NINearbyObject
 import platform.NearbyInteraction.NINearbyObjectRemovalReason
+import platform.NearbyInteraction.NINearbyObjectVerticalDirectionEstimateAbove
+import platform.NearbyInteraction.NINearbyObjectVerticalDirectionEstimateAboveOrBelow
+import platform.NearbyInteraction.NINearbyObjectVerticalDirectionEstimateBelow
+import platform.NearbyInteraction.NINearbyObjectVerticalDirectionEstimateSame
 import platform.NearbyInteraction.NINearbyPeerConfiguration
 import platform.NearbyInteraction.NISession
 import platform.NearbyInteraction.NISessionDelegateProtocol
@@ -40,7 +44,7 @@ import platform.darwin.DISPATCH_TIME_NOW
 @OptIn(ExperimentalForeignApi::class)
 actual class MultiplatformUwbManager(private val options: UwbOptions = UwbOptions()) {
 
-    private var rangingCallback: ((String, Double, Double?, Double?) -> Unit)? = null
+    private var rangingCallback: ((String, Double, Double?, Double?, VerticalDirection?) -> Unit)? = null
     private var errorCallback: ((String?, String) -> Unit)? = null
     private var sessionEventCallback: ((String, SessionEvent) -> Unit)? = null
 
@@ -371,7 +375,15 @@ actual class MultiplatformUwbManager(private val options: UwbOptions = UwbOption
         releaseArSessionIfUnused()
     }
 
-    actual fun setRangingCallback(callback: (peerId: String, distance: Double, azimuth: Double?, elevation: Double?) -> Unit) {
+    actual fun setRangingCallback(
+        callback: (
+            peerId: String,
+            distance: Double,
+            azimuth: Double?,
+            elevation: Double?,
+            verticalDirection: VerticalDirection?,
+        ) -> Unit
+    ) {
         rangingCallback = callback
     }
 
@@ -420,23 +432,18 @@ actual class MultiplatformUwbManager(private val options: UwbOptions = UwbOption
                     if (obj is NINearbyObject) {
                         val distance = obj.distance.toDouble()
                         if (!distance.isNaN()) {
-                            // Azimuth (`horizontalAngle`) is iOS 16+ and is NaN until camera-assistance
-                            // convergence, so only emit it when available and valid. NearbyInteraction
-                            // reports it in radians; convert to degrees to match the module contract
-                            // (Android reports degrees), so consumers get one consistent unit.
-                            val azimuth: Double? =
-                                if (directionApiAvailable) {
-                                    obj.horizontalAngle.let {
-                                        if (it.isNaN()) null else it.toDouble() * 180.0 / PI
-                                    }
-                                } else {
-                                    null
-                                }
-
-                            // NearbyInteraction exposes no elevation angle — `verticalDirectionEstimate`
-                            // is a direction category (above/below/same), not a measurement — so we
-                            // leave elevation null on iOS rather than emit a meaningless value.
-                            rangingCallback?.invoke(peerId, distance, azimuth, null)
+                            // Two mutually exclusive direction sources, and both have to be read
+                            // (#63): `direction` is the unit vector that direction-capable hardware
+                            // fills, while `horizontalAngle` is iOS 16+ and only filled by a
+                            // camera-assisted session, which is exactly the case where there is no
+                            // direction hardware (see wantsCameraAssistance). Reading only the angle
+                            // meant every direction-capable iPhone reported no angle at all.
+                            val angles = anglesFrom(obj)
+                            val azimuth = angles?.azimuth ?: cameraAssistedAzimuth(obj)
+                            // No vector means no elevation angle either, so pass on NI's coarse
+                            // above/below category in its place.
+                            val vertical = if (angles == null) verticalDirectionOf(obj) else null
+                            rangingCallback?.invoke(peerId, distance, azimuth, angles?.elevation, vertical)
                         }
                     }
                 }
@@ -566,6 +573,46 @@ actual class MultiplatformUwbManager(private val options: UwbOptions = UwbOption
     }
 
     // ---- Helpers ----
+
+    /**
+     * Angles from `NINearbyObject.direction`. simd_float3 arrives as a non-null `Vector128`
+     * (x, y, z, pad), which Kotlin/Native has no `.x/.y/.z` for, so read the 32-bit lanes; the
+     * unavailable sentinel is a vector of NaNs and [directionToAngles] rejects it.
+     */
+    private fun anglesFrom(obj: NINearbyObject): DirectionAngles? {
+        val dir = obj.direction
+        return directionToAngles(
+            x = dir.getFloatAt(0).toDouble(),
+            y = dir.getFloatAt(1).toDouble(),
+            z = dir.getFloatAt(2).toDouble(),
+        )
+    }
+
+    /**
+     * Azimuth in degrees from the camera-assisted `horizontalAngle` (iOS 16+, radians, NaN until
+     * convergence). Converted to degrees because Android reports degrees and the module contract is
+     * one unit for both.
+     */
+    private fun cameraAssistedAzimuth(obj: NINearbyObject): Double? {
+        if (!directionApiAvailable) return null
+        val radians = obj.horizontalAngle
+        return if (radians.isNaN()) null else radians.toDouble() * 180.0 / PI
+    }
+
+    /** NI's coarse vertical estimate (iOS 16+): the only vertical output a camera-assisted session has. */
+    private fun verticalDirectionOf(obj: NINearbyObject): VerticalDirection? {
+        if (!directionApiAvailable) return null
+        // NS_ENUM, but cinterop maps this one to a typealias plus top-level constants rather than a
+        // Kotlin enum, so these are plain values and the `when` needs an else.
+        return when (obj.verticalDirectionEstimate) {
+            NINearbyObjectVerticalDirectionEstimateSame -> VerticalDirection.Same
+            NINearbyObjectVerticalDirectionEstimateAbove -> VerticalDirection.Above
+            NINearbyObjectVerticalDirectionEstimateBelow -> VerticalDirection.Below
+            NINearbyObjectVerticalDirectionEstimateAboveOrBelow -> VerticalDirection.AboveOrBelow
+            // Unknown, and anything a later SDK adds, is no information.
+            else -> null
+        }
+    }
 
     private fun dispatchToMain(block: () -> Unit) {
         dispatch_async(dispatch_get_main_queue()) { block() }
