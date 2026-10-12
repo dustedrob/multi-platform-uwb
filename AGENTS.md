@@ -130,6 +130,14 @@ composeApp (sample)          uwbmodule (library, package com.dustedrob.uwb)
 
 **iOS**
 - `NISession.delegate` and `ARSession.delegate` are weak: hold delegates strongly (`activeDelegates`).
+- **Every field of `MultiplatformUwbManager.ios` is guarded by `stateLock`** (an `NSRecursiveLock`;
+  use the `withState { }` helper). The orchestrator calls `startRanging`/`stopRanging`/
+  `prepareConnectionConfig` on `Dispatchers.Default` while the CoreBluetooth delegates call
+  `createConnectionConfig`/`getConnectionConfig` on the main queue, so the maps are written from two
+  threads. Unsynchronized this corrupts rather than merely goes stale: a lost `activeDelegates` entry
+  deallocates a weak delegate and that session goes silent, and a torn check-then-act in
+  `attachSharedArSession` mints a second ARSession that fights the first for the camera (#54). Hold
+  the lock only around state access, never around `runWithConfiguration` / `invalidate` / `pause`.
 - NI does not resume by itself after `sessionSuspensionEnded`; re-run `runWithConfiguration` with the
   stored `NIConfiguration`.
 - Camera assistance (iOS 16+, no direction hardware) needs **one shared `ARSession`** across NISessions
