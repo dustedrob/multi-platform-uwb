@@ -74,9 +74,19 @@ class UwbDiscoveryViewModel(
         // Observe lifecycle events
         viewModelScope.launch {
             deviceDiscoveryManager.events.collect { event ->
-                _connectionEvents.value = _connectionEvents.value + event
+                _connectionEvents.value = (_connectionEvents.value + event).takeLast(MAX_LOG_EVENTS)
             }
         }
+    }
+
+    private companion object {
+        /**
+         * The log is a debugging aid, and some events arrive continuously (iOS convergence updates
+         * fire until the angles settle). Unbounded it grew without limit and copied the whole list on
+         * every event, which showed up as render-thread pressure in Compose's text layer on a long
+         * session with several peers.
+         */
+        const val MAX_LOG_EVENTS = 200
     }
 
     fun clearLog() {
