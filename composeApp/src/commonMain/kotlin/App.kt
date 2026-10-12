@@ -143,9 +143,12 @@ fun App() {
         }
 
         val logListState = rememberLazyListState()
-        LaunchedEffect(connectionEvents.size) {
+        // Keyed on the newest event, not the list size: the log is capped, so once it saturates the
+        // size stops changing and a size-keyed effect would stop following the tail. Plain
+        // scrollToItem rather than the animated one, which queued an animation per event.
+        LaunchedEffect(connectionEvents.lastOrNull()) {
             if (connectionEvents.isNotEmpty()) {
-                logListState.animateScrollToItem(connectionEvents.size - 1)
+                logListState.scrollToItem(connectionEvents.size - 1)
             }
         }
 
