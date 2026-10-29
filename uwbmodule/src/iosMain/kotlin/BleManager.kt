@@ -133,7 +133,7 @@ actual class BleManager(
                 val deviceName = advertisementData[CBAdvertisementDataLocalNameKey] as? String
                     ?: didDiscoverPeripheral.name
                     ?: "Unknown Device"
-                if (!config.accepts(deviceId, deviceName)) {
+                if (!config.accepts(deviceName)) {
                     NSLog("BleManager: filtered out by app: $deviceName ($deviceId)")
                     return
                 }

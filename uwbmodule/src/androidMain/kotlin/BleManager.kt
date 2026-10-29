@@ -69,7 +69,7 @@ actual class BleManager(
     // Track discovered peripherals for GATT client connections
     private val discoveredDevices = mutableMapOf<String, AccessoryDevice>()
 
-    /** Devices [BleDiscoveryConfig.deviceFilter] rejected, so each one is judged and logged once. */
+    /** Devices [BleDiscoveryConfig.nameContains] rejected, so each one is judged and logged once. */
     private val filteredDevices = mutableSetOf<String>()
 
     /** A live accessory connection kept open during ranging, for [sendToPeer] and the stop handshake. */
@@ -151,7 +151,7 @@ actual class BleManager(
                 ?: "Unknown Device"
             if (discoveredDevices[deviceAddress] != null) return
             if (deviceAddress in filteredDevices) return
-            if (!config.accepts(deviceAddress, deviceName)) {
+            if (!config.accepts(deviceName)) {
                 // Remember the verdict so 50 advertisements from the same board log once.
                 filteredDevices.add(deviceAddress)
                 Log.d(TAG, "Filtered out by app: $deviceName ($deviceAddress)")

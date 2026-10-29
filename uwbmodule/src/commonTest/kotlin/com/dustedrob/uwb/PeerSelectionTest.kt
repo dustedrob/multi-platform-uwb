@@ -9,33 +9,54 @@ class BleDiscoveryConfigFilterTest {
     @Test
     fun noFilterAcceptsEverything() {
         val config = BleDiscoveryConfig()
-        assertTrue(config.accepts("AA:BB:CC:DD:EE:FF", "Anything"))
-        assertTrue(config.accepts("", ""))
+        assertTrue(config.accepts("Anything"))
+        assertTrue(config.accepts(""))
     }
 
     @Test
-    fun substringFilterMatchesTheInterestingPart() {
+    fun substringMatchesTheInterestingPart() {
         // The shape @sdetweil described on #60: one UUID across a fleet, the identity is a substring
         // of the advertised name and the rest is don't-care.
-        val config = BleDiscoveryConfig(deviceFilter = { _, name -> "(42)" in name })
-        assertTrue(config.accepts("id-1", "DWM3001 (42) rev-c"))
-        assertFalse(config.accepts("id-2", "DWM3001 (43) rev-c"))
+        val config = BleDiscoveryConfig(nameContains = listOf("(42)"))
+        assertTrue(config.accepts("DWM3001 (42) rev-c"))
+        assertFalse(config.accepts("DWM3001 (43) rev-c"))
     }
 
     @Test
-    fun filterSeesBothIdAndName() {
-        val config = BleDiscoveryConfig(deviceFilter = { id, name -> id == "keep" || name == "keep" })
-        assertTrue(config.accepts("keep", "no"))
-        assertTrue(config.accepts("no", "keep"))
-        assertFalse(config.accepts("no", "no"))
+    fun anyEntryIsEnough() {
+        val config = BleDiscoveryConfig(nameContains = listOf("(42)", "(44)"))
+        assertTrue(config.accepts("board (42)"))
+        assertTrue(config.accepts("board (44)"))
+        assertFalse(config.accepts("board (43)"))
+    }
+
+    @Test
+    fun matchIgnoresCase() {
+        val config = BleDiscoveryConfig(nameContains = listOf("dwm3001"))
+        assertTrue(config.accepts("DWM3001 rev-c"))
     }
 
     @Test
     fun filterIsIndependentOfProfileMatching() {
-        // activeProfiles still governs which UUIDs are scanned for; the filter is a second gate.
-        val config = BleDiscoveryConfig(deviceFilter = { _, _ -> false })
+        // activeProfiles still governs which UUIDs are scanned for; the name is a second gate.
+        val config = BleDiscoveryConfig(nameContains = listOf("nothing-matches-this"))
         assertTrue(config.activeProfiles.isNotEmpty())
-        assertFalse(config.accepts("id", "name"))
+        assertFalse(config.accepts("some device"))
+    }
+
+    @Test
+    fun configsWithTheSameFilterAreEqual() {
+        // The reason this is a list and not a predicate: a lambda field would make equality
+        // reference-based, so a config rebuilt in a Compose composition would never equal the
+        // previous one and everything keyed on it would be torn down and remade.
+        assertTrue(
+            BleDiscoveryConfig(nameContains = listOf("a", "b")) ==
+                BleDiscoveryConfig(nameContains = listOf("a", "b"))
+        )
+        assertFalse(
+            BleDiscoveryConfig(nameContains = listOf("a")) ==
+                BleDiscoveryConfig(nameContains = listOf("b"))
+        )
     }
 }
 

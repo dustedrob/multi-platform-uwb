@@ -78,7 +78,7 @@ internal fun isStale(
  *   False gives discover-only mode: peers are listed as [DeviceState.Discovered] and left alone
  *   until the app calls [connectPeer], for an app that presents a pick list instead of ranging with
  *   everything it can see. Narrowing *what gets listed* is a separate thing and belongs to
- *   [BleDiscoveryConfig.deviceFilter], which runs before any UWB config is minted.
+ *   [BleDiscoveryConfig.nameContains], which runs before any UWB config is minted.
  */
 class DeviceDiscoveryManager(
     private val multiplatformUwbManager: MultiplatformUwbManager,

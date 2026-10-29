@@ -51,8 +51,8 @@ class UwbDiscoveryViewModel(
         // Range with everything we discover. An app that wants to choose instead passes false and
         // calls connectPeer() from its own UI, which is what the Connect button below drives once a
         // device has been disconnected. To narrow what is even listed, use
-        // BleDiscoveryConfig(deviceFilter = { _, name -> "(42)" in name }) above: that runs in the
-        // BLE scan callbacks, before any UWB session scope is minted for the device.
+        // BleDiscoveryConfig(nameContains = listOf("DWM3001")) above: that runs in the BLE scan
+        // callbacks, before any UWB session scope is minted for the device.
         autoConnect = true,
     )
     var permissionState by mutableStateOf(PermissionState.NotDetermined)

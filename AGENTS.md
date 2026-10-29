@@ -105,7 +105,7 @@ composeApp (sample)          uwbmodule (library, package com.dustedrob.uwb)
   `restartPeer` / `restartFailedPeers` (e.g. on foreground). Keep new recovery logic in
   `RecoveryTracker` so it stays testable.
 - **Discovery narrowing happens in the BLE scan callbacks, selection in the orchestrator.**
-  `BleDiscoveryConfig.deviceFilter` (plus `advertise` / `hostGattServer`) is BLE policy and is
+  `BleDiscoveryConfig.nameContains` (plus `advertise` / `hostGattServer`) is BLE policy and is
   applied in `onScanResult` / `didDiscoverPeripheral`, *before* `prepareConnectionConfig`, because on
   Android preparing a config is several GMS round trips and two session scopes that a rejected device
   would then hold until `cleanup()`. Whether a listed peer is ranged with automatically is a separate
