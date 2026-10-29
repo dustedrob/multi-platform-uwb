@@ -104,6 +104,15 @@ composeApp (sample)          uwbmodule (library, package com.dustedrob.uwb)
   link and get INIT again. Bounded by `maxAttempts` with doubling backoff; the app can force one with
   `restartPeer` / `restartFailedPeers` (e.g. on foreground). Keep new recovery logic in
   `RecoveryTracker` so it stays testable.
+- **Discovery narrowing happens in the BLE scan callbacks, selection in the orchestrator.**
+  `BleDiscoveryConfig.deviceFilter` (plus `advertise` / `hostGattServer`) is BLE policy and is
+  applied in `onScanResult` / `didDiscoverPeripheral`, *before* `prepareConnectionConfig`, because on
+  Android preparing a config is several GMS round trips and two session scopes that a rejected device
+  would then hold until `cleanup()`. Whether a listed peer is ranged with automatically is a separate
+  question and belongs to `DeviceDiscoveryManager(autoConnect = ...)` with `connectPeer` /
+  `disconnectPeer`. In discover-only mode `Discovered` peers are exempt from the stale purge (see
+  `isStale`): they are reported once, so `lastSeen` never refreshes and the pick list would otherwise
+  empty itself. (PR #60)
 - **`enableAndroidAccessoryProtocol` is off by default and Android-only.** iOS accessory ranging is
   Apple's standard protocol and always on when an accessory profile is present.
 - **Wire format is little-endian** with optional trailers (`UwbSessionConfig.toByteArray`), so accessory

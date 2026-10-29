@@ -69,6 +69,9 @@ actual class BleManager(
     // Track discovered peripherals for GATT client connections
     private val discoveredDevices = mutableMapOf<String, AccessoryDevice>()
 
+    /** Devices [BleDiscoveryConfig.deviceFilter] rejected, so each one is judged and logged once. */
+    private val filteredDevices = mutableSetOf<String>()
+
     /** A live accessory connection kept open during ranging, for [sendToPeer] and the stop handshake. */
     private class AccessoryConnection(
         val gatt: BluetoothGatt,
@@ -140,8 +143,20 @@ actual class BleManager(
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             val device = result.device
             val deviceAddress = device.address
-            val deviceName = if (hasConnectPermission()) device.name ?: "Unknown Device" else "Unknown Device"
+            // Prefer the advertised local name: it rides in the scan response (see advertise()),
+            // needs no BLUETOOTH_CONNECT, and is what a name filter is written against. device.name
+            // is the cached GAP name and is often null until we have connected once.
+            val deviceName = result.scanRecord?.deviceName
+                ?: (if (hasConnectPermission()) device.name else null)
+                ?: "Unknown Device"
             if (discoveredDevices[deviceAddress] != null) return
+            if (deviceAddress in filteredDevices) return
+            if (!config.accepts(deviceAddress, deviceName)) {
+                // Remember the verdict so 50 advertisements from the same board log once.
+                filteredDevices.add(deviceAddress)
+                Log.d(TAG, "Filtered out by app: $deviceName ($deviceAddress)")
+                return
+            }
 
             var profile: UwbProfile? = null
             result.scanRecord?.serviceUuids?.forEach { uuid ->
@@ -348,6 +363,10 @@ actual class BleManager(
 
     @RequiresPermission(BLUETOOTH_CONNECT)
     actual fun advertise() {
+        if (!config.advertise) {
+            Log.d(TAG, "Advertising disabled by BleDiscoveryConfig")
+            return
+        }
         if (bluetoothAdapter == null || bluetoothAdapter?.isEnabled != true) {
             Log.e(TAG, "Bluetooth is not enabled or not supported")
             return
@@ -416,6 +435,10 @@ actual class BleManager(
 
     @RequiresPermission(BLUETOOTH_CONNECT)
     actual fun startGattServer() {
+        if (!config.hostGattServer) {
+            Log.d(TAG, "GATT server disabled by BleDiscoveryConfig")
+            return
+        }
         if (!hasConnectPermission()) {
             Log.e(TAG, "Missing BLUETOOTH_CONNECT permission for GATT server")
             return

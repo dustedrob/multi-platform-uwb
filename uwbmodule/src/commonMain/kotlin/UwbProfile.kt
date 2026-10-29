@@ -140,12 +140,35 @@ const val NI_ACCESSORY_DID_STOP: Byte = 0x03
  *   Interaction Accessory Protocol (`NINearbyAccessoryConfiguration`), which works with stock
  *   accessory firmware, so iOS honors any accessory profile whenever it is present regardless of this
  *   flag. Peer-to-peer ([ExchangeProtocol.ReadWrite]) profiles are unaffected on both platforms.
+ * @property deviceFilter optional app predicate over the platform BLE id (Android MAC, iOS
+ *   peripheral UUID) and the advertised name, for when the advertised service UUID is too coarse: a
+ *   fleet of accessories shares one UUID and the app wants a named subset of it. Return true to
+ *   pursue the device. Null, the default, accepts everything. See [accepts] for why this is applied
+ *   in the scan callbacks rather than further up.
+ * @property advertise whether this device advertises as a UWB peer. False for an app that only
+ *   connects *out* to accessories and should not be ranged with by other phones.
+ * @property hostGattServer whether to host the local GATT server that peers read our config from.
+ *   False goes with [advertise] = false: nothing can find us, so nothing will read it.
  */
 data class BleDiscoveryConfig(
     val profiles: List<UwbProfile> = DEFAULT_PROFILES,
     val advertiseProfile: String = DEFAULT_PROFILES.first().name,
     val enableAndroidAccessoryProtocol: Boolean = false,
+    val deviceFilter: ((bleId: String, advertisedName: String) -> Boolean)? = null,
+    val advertise: Boolean = true,
+    val hostGattServer: Boolean = true,
 ) {
+    /**
+     * Whether a scan result should be pursued at all, per [deviceFilter]. A null filter accepts
+     * everything, which is the default.
+     *
+     * Called from the platform scan callbacks *before* any UWB config is minted for the peer, so a
+     * rejected device costs nothing: on Android, preparing a config is several GMS round trips and
+     * two session scopes that would then sit unused until `cleanup()`.
+     */
+    fun accepts(bleId: String, advertisedName: String): Boolean =
+        deviceFilter?.invoke(bleId, advertisedName) ?: true
+
     /**
      * The profiles used for discovery on **Android** after applying [enableAndroidAccessoryProtocol]:
      * identical to [profiles] when the flag is set, otherwise [ExchangeProtocol.AccessoryNotify]
