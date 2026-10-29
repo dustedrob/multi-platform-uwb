@@ -142,8 +142,15 @@ composeApp (sample)          uwbmodule (library, package com.dustedrob.uwb)
   stored `NIConfiguration`.
 - Camera assistance (iOS 16+, no direction hardware) needs **one shared `ARSession`** across NISessions
   and `sessionShouldAttemptRelocalization == false`; two private ARSessions fight for the camera.
-- `horizontalAngle` is radians and NaN until convergence; convert to degrees (Android reports degrees).
-  `verticalDirectionEstimate` is a category, not an angle, so elevation is `null` on iOS today.
+- **Two mutually exclusive direction sources, and both have to be read** (#63). Direction-capable
+  hardware fills `NINearbyObject.direction`, a unit vector (simd_float3, so a `Vector128` with no
+  `.x/.y/.z` in K/N: read the float lanes), and the unavailable sentinel is a vector of NaNs.
+  A camera-assisted session instead fills `horizontalAngle` (iOS 16+, radians, NaN until convergence)
+  and `verticalDirectionEstimate`, a category rather than an angle. Since camera assistance is enabled
+  only when there is no direction hardware, reading just `horizontalAngle` means every
+  direction-capable iPhone reports no angle at all. The vector math lives in `directionToAngles`
+  (commonMain, tested); elevation is `null` on the camera-assisted path and `NearbyDevice.verticalDirection`
+  carries the category there.
 - `NIAlgorithmConvergenceStatusReason` is `NS_TYPED_ENUM` NSString constants, not an enum in K/N.
 - `NearbyInteraction` only forward-declares `ARSession`; cast to `objcnames.classes.ARSession`.
 - Several CoreBluetooth delegate methods are deliberately not overridden (ObjC selector clashes in K/N):

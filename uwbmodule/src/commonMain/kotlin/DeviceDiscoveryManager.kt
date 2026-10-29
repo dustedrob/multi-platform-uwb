@@ -151,8 +151,8 @@ class DeviceDiscoveryManager(
             scope.launch { onConfigExchanged(peerId, remoteConfig) }
         }
 
-        multiplatformUwbManager.setRangingCallback { peerId , distance , azimuth, elevation ->
-            scope.launch { onRangingResult(peerId, distance, azimuth, elevation ) }
+        multiplatformUwbManager.setRangingCallback { peerId, distance, azimuth, elevation, vertical ->
+            scope.launch { onRangingResult(peerId, distance, azimuth, elevation, vertical) }
         }
 
         // Return path for the accessory protocol: data the UWB layer generates (e.g. iOS shareable
@@ -560,7 +560,13 @@ class DeviceDiscoveryManager(
 
 
     /** Called when UWB ranging data is received. */
-    internal suspend fun onRangingResult(peerId: String, distance: Double, azimuth: Double?, elevation: Double?) = mutex.withLock {
+    internal suspend fun onRangingResult(
+        peerId: String,
+        distance: Double,
+        azimuth: Double?,
+        elevation: Double?,
+        verticalDirection: VerticalDirection? = null,
+    ) = mutex.withLock {
         val existingDevices = _nearbyDevices.value.toMutableList()
         val deviceIndex = existingDevices.indexOfFirst { it.id == peerId }
 
@@ -570,6 +576,7 @@ class DeviceDiscoveryManager(
                 distance = distance,
                 azimuth = azimuth,
                 elevation = elevation,
+                verticalDirection = verticalDirection,
                 lastSeen = getCurrentTimeMillis(),
                 state = DeviceState.Ranging
             )
