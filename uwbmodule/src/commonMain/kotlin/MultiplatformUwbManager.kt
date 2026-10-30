@@ -50,6 +50,55 @@ internal fun shouldUseCameraAssistance(
 }
 
 /**
+ * What the local device's UWB radio can actually measure, read from the platform at runtime.
+ *
+ * Worth asking because "does this phone report an angle" cannot be answered from the model name.
+ * On iOS, `supportsDirectionMeasurement` is true only for the U1 generation (iPhone 11 through 13);
+ * 14 and later report false and offer direction only through camera assistance, which costs a
+ * convergence wave and the camera (#75). An app that needs a bearing on such a device has to derive
+ * one itself, and [reportsAzimuth] is the branch point for that.
+ *
+ * @property supportsDistance distance ranging. False means UWB has nothing to offer here.
+ * @property supportsDirection the radio measures direction to the peer by itself: iOS
+ *   `supportsDirectionMeasurement`, Android `isAzimuthalAngleSupported`.
+ * @property supportsElevationAngle a numeric elevation angle is available. iOS folds this into
+ *   [supportsDirection] (one direction vector carries both); Android reports it separately.
+ * @property supportsCameraAssistance the device can derive direction from the camera instead
+ *   (iOS 16+). Always false on Android, which has no such mode.
+ * @property cameraAssistanceActive camera assistance will be used for new sessions: the device
+ *   supports it *and* [UwbOptions.cameraAssistance] allows it. Always false when the radio measures
+ *   direction itself, since assistance would only add cost (see [shouldUseCameraAssistance]).
+ */
+data class UwbCapabilities(
+    val supportsDistance: Boolean,
+    val supportsDirection: Boolean,
+    val supportsElevationAngle: Boolean,
+    val supportsCameraAssistance: Boolean,
+    val cameraAssistanceActive: Boolean,
+) {
+    /**
+     * Whether [NearbyDevice.azimuth] will be filled by the library on its own. False means the app
+     * gets distance only and has to derive a bearing itself if it needs one.
+     */
+    val reportsAzimuth: Boolean get() = supportsDirection || cameraAssistanceActive
+
+    /**
+     * Whether [NearbyDevice.elevation] will be filled. A camera-assisted session has no vertical
+     * angle, only the coarse [NearbyDevice.verticalDirection], so this stays false there.
+     */
+    val reportsElevation: Boolean get() = supportsElevationAngle
+}
+
+/** No usable radio, or the platform would not answer: everything unsupported. */
+internal val NO_UWB_CAPABILITIES = UwbCapabilities(
+    supportsDistance = false,
+    supportsDirection = false,
+    supportsElevationAngle = false,
+    supportsCameraAssistance = false,
+    cameraAssistanceActive = false,
+)
+
+/**
  * Platform UWB manager for ranging with nearby peers.
  *
  * Typical flow:
@@ -86,6 +135,13 @@ expect class MultiplatformUwbManager {
      * @param remoteConfig The peer's [UwbSessionConfig] received via BLE GATT exchange.
      */
     suspend fun startRanging(peerId: String, remoteConfig: UwbSessionConfig)
+
+    /**
+     * What this device's radio can measure (see [UwbCapabilities]). Suspending because Android has
+     * to mint a GMS session scope to ask; the answer is cached after the first call since it cannot
+     * change while the app runs.
+     */
+    suspend fun capabilities(): UwbCapabilities
 
     /** Stop ranging with the given peer. */
     suspend fun stopRanging(peerId: String)

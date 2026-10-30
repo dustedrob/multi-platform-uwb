@@ -158,6 +158,9 @@ actual class MultiplatformUwbManager(private val options: UwbOptions = UwbOption
      * the device lacks direction-capable UWB hardware but can use the camera instead (iOS 16+).
      */
     private fun wantsCameraAssistance(): Boolean {
+        // `deviceCapabilities` is itself iOS 16+, and so is camera assistance, so pre-16 the answer
+        // is no without asking (asking would be an unrecognized selector).
+        if (!directionApiAvailable) return false
         val caps = NISession.deviceCapabilities
         val wanted = shouldUseCameraAssistance(
             mode = options.cameraAssistance,
@@ -193,6 +196,34 @@ actual class MultiplatformUwbManager(private val options: UwbOptions = UwbOption
 
     private companion object {
         const val RESUME_DELAY_MS = 500L
+    }
+
+    actual suspend fun capabilities(): UwbCapabilities {
+        if (!NISession.isSupported()) return NO_UWB_CAPABILITIES
+        // Pre-16 there is no capability API to ask, but the deduction is safe: NearbyInteraction
+        // needs UWB hardware, which starts at the iPhone 11, and the first iPhone without direction
+        // measurement (the 14) shipped on iOS 16. So any device still on 15 that supports NI is a
+        // U1 device, and U1 measures direction.
+        if (!directionApiAvailable) {
+            return UwbCapabilities(
+                supportsDistance = true,
+                supportsDirection = true,
+                supportsElevationAngle = true,
+                supportsCameraAssistance = false,
+                cameraAssistanceActive = false,
+            )
+        }
+        val caps = NISession.deviceCapabilities
+        val direction = caps.supportsDirectionMeasurement
+        return UwbCapabilities(
+            supportsDistance = caps.supportsPreciseDistanceMeasurement,
+            supportsDirection = direction,
+            // One direction vector carries azimuth and elevation, so on iOS they stand or fall
+            // together; there is no separate elevation capability to report.
+            supportsElevationAngle = direction,
+            supportsCameraAssistance = caps.supportsCameraAssistance,
+            cameraAssistanceActive = wantsCameraAssistance(),
+        )
     }
 
      actual suspend fun initialize() {
