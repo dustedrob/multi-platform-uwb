@@ -50,6 +50,7 @@ import com.dustedrob.uwb.DeviceState
 import com.dustedrob.uwb.DiscoveryEvent
 import com.dustedrob.uwb.EventType
 import com.dustedrob.uwb.NearbyDevice
+import com.dustedrob.uwb.UwbCapabilities
 import com.dustedrob.uwb.UwbSessionConfig
 import com.dustedrob.uwb.VerticalDirection
 import dev.icerock.moko.permissions.PermissionState
@@ -76,6 +77,7 @@ fun App() {
     val nearbyDevices by viewModel.nearbyDevices.collectAsState()
     val connectionEvents by viewModel.connectionEvents.collectAsState()
     val localConfig by viewModel.localConfig.collectAsState()
+    val capabilities by viewModel.capabilities.collectAsState()
 
     Column(
         modifier = Modifier
@@ -84,7 +86,7 @@ fun App() {
             .padding(16.dp)
     ) {
         // Local device info
-        LocalDeviceInfo(localConfig, isScanning)
+        LocalDeviceInfo(localConfig, isScanning, capabilities)
 
         Spacer(modifier = Modifier.height(8.dp))
 
@@ -174,7 +176,11 @@ fun App() {
 }
 
 @Composable
-private fun LocalDeviceInfo(config: UwbSessionConfig?, isScanning: Boolean) {
+private fun LocalDeviceInfo(
+    config: UwbSessionConfig?,
+    isScanning: Boolean,
+    capabilities: UwbCapabilities? = null,
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         elevation = 2.dp,
@@ -195,8 +201,22 @@ private fun LocalDeviceInfo(config: UwbSessionConfig?, isScanning: Boolean) {
                     color = Color.Gray
                 )
             }
+            // Shown because it decides what the device list can display: no azimuth here means an
+            // app that needs a bearing has to derive one itself (#75).
+            capabilities?.let {
+                Text(capabilityLabel(it), style = MaterialTheme.typography.caption, color = Color.Gray)
+            }
         }
     }
+}
+
+/** One line summarising what this radio measures, in the terms an app has to plan around. */
+private fun capabilityLabel(caps: UwbCapabilities): String = when {
+    !caps.supportsDistance -> "No UWB ranging on this device"
+    caps.supportsDirection -> "Measures distance and angle"
+    caps.cameraAssistanceActive -> "Distance, angle via camera after convergence"
+    caps.supportsCameraAssistance -> "Distance only (camera assistance available but off)"
+    else -> "Distance only"
 }
 
 @Composable
@@ -508,6 +528,23 @@ private fun LocalDeviceInfoPreview() {
                 uwbAddress = byteArrayOf(0x0A, 0x1B, 0x2C, 0x3D),
             ),
             isScanning = true,
+        )
+        LocalDeviceInfo(
+            config = UwbSessionConfig(
+                sessionId = 7,
+                channel = 9,
+                preambleIndex = 10,
+                uwbAddress = byteArrayOf(0x11, 0x22),
+            ),
+            isScanning = true,
+            // An iPhone 14 or later with camera assistance off: distance, no bearing.
+            capabilities = UwbCapabilities(
+                supportsDistance = true,
+                supportsDirection = false,
+                supportsElevationAngle = false,
+                supportsCameraAssistance = true,
+                cameraAssistanceActive = false,
+            ),
         )
         LocalDeviceInfo(config = null, isScanning = false)
     }
