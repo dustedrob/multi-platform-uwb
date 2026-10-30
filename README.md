@@ -39,7 +39,7 @@ The library combines **Bluetooth Low Energy (BLE)** for initial device discovery
 
 - **BLE Device Discovery**: Automatic scanning and advertising for UWB-capable devices
 - **Precise UWB Ranging**: Real-time distance measurements with centimeter-level accuracy
-- **Angle of Arrival**: Azimuth/elevation alongside distance, where the hardware supports it. On Android, devices with AoA-capable antennas. On iOS, direction-capable hardware reports both; a device without it falls back to Camera Assistance (iOS 16+), which gives azimuth plus a coarse `verticalDirection` (above/below) instead of an elevation angle
+- **Angle of Arrival**: Azimuth/elevation alongside distance, where the hardware supports it. On Android, devices with AoA-capable antennas. On iOS, only the U1 generation (iPhone 11 through 13) measures direction and reports both; iPhone 14 and later fall back to Camera Assistance (iOS 16+), which gives azimuth plus a coarse `verticalDirection` (above/below) instead of an elevation angle. Ask `capabilities()` which of the three you are on rather than guessing from the model
 - **Device selection**: Narrow discovery by advertised name with `BleDiscoveryConfig.nameContains`, or list peers without ranging with them (`autoConnect = false`) and pick with `connectPeer` / `disconnectPeer`
 - **Cross-Platform API**: Unified interface for both Android and iOS platforms
 - **Reactive Data Flow**: Kotlin Flow-based real-time updates for device discovery and ranging
@@ -402,6 +402,27 @@ val nearbyDevices: Flow<List<NearbyDevice>>
 fun startScanning()
 fun stopScanning()
 ```
+
+### UwbCapabilities
+What the local radio measures, read from the platform at runtime. Angles are not a given: on iOS only
+the U1 generation (iPhone 11 through 13) measures direction, so on anything newer an angle arrives
+only with camera assistance, and with assistance off the library reports distance alone.
+
+```kotlin
+val caps = discoveryManager.capabilities()   // suspend: Android needs a GMS session scope
+
+caps.supportsDistance          // false means UWB has nothing to offer here
+caps.supportsDirection         // the radio measures direction itself
+caps.supportsElevationAngle    // a numeric elevation angle (iOS: same answer as supportsDirection)
+caps.supportsCameraAssistance  // iOS 16+ can derive direction from the camera; false on Android
+caps.cameraAssistanceActive    // ...and UwbOptions allows it, so it will be used
+
+caps.reportsAzimuth            // NearbyDevice.azimuth will be filled by the library
+caps.reportsElevation          // NearbyDevice.elevation will be filled
+```
+
+Branch on `reportsAzimuth`: when it is false the app gets distance only, and anything bearing-shaped
+(dead reckoning from distance samples plus device heading) is the app's own job.
 
 ### NearbyDevice
 Data class representing a discovered device.

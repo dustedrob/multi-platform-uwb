@@ -96,16 +96,41 @@ actual class MultiplatformUwbManager(
             errorCallback?.invoke(null, "UWB not supported on this device")
             return
         }
-        try {
-            Log.d(TAG,"uwbmanager init")
-            // Scopes are now minted per peer in createConnectionConfig; here we only sanity-check the
-            // radio. The probe scope is discarded (its address is never advertised).
-            val capabilities = androidUwbManager.controllerSessionScope().rangingCapabilities
-            if (!capabilities.isDistanceSupported) {
-                errorCallback?.invoke(null, "UWB distance ranging not supported")
-            }
+        Log.d(TAG,"uwbmanager init")
+        // Scopes are now minted per peer in createConnectionConfig; here we only sanity-check the
+        // radio, which capabilities() does (and caches, so no second probe later).
+        val capabilities = capabilities()
+        if (!capabilities.supportsDistance) {
+            errorCallback?.invoke(null, "UWB distance ranging not supported")
+        }
+    }
+
+    /**
+     * Cached because every read mints a session scope, which is several GMS round trips. Two racing
+     * callers would compute the same answer, so no lock: the radio's capabilities do not change.
+     */
+    private var cachedCapabilities: UwbCapabilities? = null
+
+    actual suspend fun capabilities(): UwbCapabilities {
+        cachedCapabilities?.let { return it }
+        val manager = androidUwbManager ?: return NO_UWB_CAPABILITIES
+        val caps = try {
+            // The probe scope is discarded; its address is never advertised.
+            manager.controllerSessionScope().rangingCapabilities
         } catch (e: Exception) {
             errorCallback?.invoke(null, "Failed to initialize UWB: ${e.message}")
+            return NO_UWB_CAPABILITIES
+        }
+        return UwbCapabilities(
+            supportsDistance = caps.isDistanceSupported,
+            supportsDirection = caps.isAzimuthalAngleSupported,
+            supportsElevationAngle = caps.isElevationAngleSupported,
+            // Camera assistance is a NearbyInteraction concept; GMS has no equivalent.
+            supportsCameraAssistance = false,
+            cameraAssistanceActive = false,
+        ).also {
+            Log.d(TAG, "UWB capabilities: $it")
+            cachedCapabilities = it
         }
     }
 

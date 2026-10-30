@@ -5,6 +5,7 @@ import com.dustedrob.uwb.LOCAL_PROFILE
 import com.dustedrob.uwb.ManagerFactory
 import com.dustedrob.uwb.NearbyDevice
 import com.dustedrob.uwb.RecoveryPolicy
+import com.dustedrob.uwb.UwbCapabilities
 import com.dustedrob.uwb.UwbSessionConfig
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -69,6 +70,14 @@ class UwbDiscoveryViewModel(
 
     private val _localConfig = MutableStateFlow<UwbSessionConfig?>(null)
     val localConfig = _localConfig.asStateFlow()
+
+    /**
+     * What the radio can measure. Null until the first scan, because on Android the answer needs
+     * UWB permission and a GMS session scope. An app with a bearing to show would branch on
+     * [UwbCapabilities.reportsAzimuth] here and fall back to its own navigation logic.
+     */
+    private val _capabilities = MutableStateFlow<UwbCapabilities?>(null)
+    val capabilities = _capabilities.asStateFlow()
 
     init {
         // Observe nearby devices
@@ -141,6 +150,8 @@ class UwbDiscoveryViewModel(
 
     private suspend fun startUwbScanning() {
         deviceDiscoveryManager.startScanning()
+        // After startScanning, which has run initialize(): Android cannot answer before that.
+        _capabilities.value = deviceDiscoveryManager.capabilities()
     }
 
     private suspend fun stopUwbScanning() {
