@@ -116,7 +116,12 @@ fun App() {
             modifier = Modifier.fillMaxWidth().weight(1f)
         ) {
             items(nearbyDevices, key = { it.id }) { device ->
-                DeviceItem(device, onRetry = { viewModel.retryDevice(device.id) })
+                DeviceItem(
+                    device,
+                    onRetry = { viewModel.retryDevice(device.id) },
+                    onConnect = { viewModel.connectDevice(device.id) },
+                    onDisconnect = { viewModel.disconnectDevice(device.id) },
+                )
             }
             if (nearbyDevices.isEmpty() && isScanning) {
                 item {
@@ -195,7 +200,12 @@ private fun LocalDeviceInfo(config: UwbSessionConfig?, isScanning: Boolean) {
 }
 
 @Composable
-private fun DeviceItem(device: NearbyDevice, onRetry: () -> Unit = {}) {
+private fun DeviceItem(
+    device: NearbyDevice,
+    onRetry: () -> Unit = {},
+    onConnect: () -> Unit = {},
+    onDisconnect: () -> Unit = {},
+) {
     val stateColor = when (device.state) {
         DeviceState.Discovered -> Color.Gray
         DeviceState.ExchangingConfig -> Color(0xFFFFC107) // yellow
@@ -262,6 +272,14 @@ private fun DeviceItem(device: NearbyDevice, onRetry: () -> Unit = {}) {
                 // The automatic restarts are bounded, so a peer that used them all up needs a nudge.
                 if (device.state == DeviceState.Error) {
                     TextButton(onClick = onRetry) { Text("Retry") }
+                }
+                // Manual selection. Always offered so the pick-list API is exercised in the sample;
+                // an app built around it would run with autoConnect off and show only this.
+                if (device.state == DeviceState.Discovered) {
+                    TextButton(onClick = onConnect) { Text("Connect") }
+                }
+                if (device.state == DeviceState.Ranging) {
+                    TextButton(onClick = onDisconnect) { Text("Disconnect") }
                 }
                 if (device.state == DeviceState.Ranging) {
                     DirectionArrow(

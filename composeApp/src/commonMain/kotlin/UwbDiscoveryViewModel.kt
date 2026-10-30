@@ -48,6 +48,12 @@ class UwbDiscoveryViewModel(
         // own is restarted up to three times with doubling backoff, and a peer that claims to be
         // ranging but reports nothing for 10 s is treated as ended.
         RecoveryPolicy(),
+        // Range with everything we discover. An app that wants to choose instead passes false and
+        // calls connectPeer() from its own UI, which is what the Connect button below drives once a
+        // device has been disconnected. To narrow what is even listed, use
+        // BleDiscoveryConfig(nameContains = listOf("DWM3001")) above: that runs in the BLE scan
+        // callbacks, before any UWB session scope is minted for the device.
+        autoConnect = true,
     )
     var permissionState by mutableStateOf(PermissionState.NotDetermined)
         private set
@@ -139,6 +145,20 @@ class UwbDiscoveryViewModel(
 
     private suspend fun stopUwbScanning() {
         deviceDiscoveryManager.stopScanning()
+    }
+
+    /** Range with a discovered peer the app chose. No-op if it is already exchanging or ranging. */
+    fun connectDevice(peerId: String) {
+        viewModelScope.launch { deviceDiscoveryManager.connectPeer(peerId) }
+    }
+
+    /**
+     * Stop ranging with one peer but keep it listed, so it can be reconnected without rescanning.
+     * With autoConnect on, the device sits Discovered until the stale purge drops it, so reconnect
+     * within the 10 s window or let it be re-discovered and started again automatically.
+     */
+    fun disconnectDevice(peerId: String) {
+        viewModelScope.launch { deviceDiscoveryManager.disconnectPeer(peerId) }
     }
 
     /** Restart one peer's session now, e.g. from a retry button on a failed device. */

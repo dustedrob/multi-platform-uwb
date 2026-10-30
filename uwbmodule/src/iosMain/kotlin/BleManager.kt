@@ -128,7 +128,15 @@ actual class BleManager(
         ) {
             val deviceId = didDiscoverPeripheral.identifier.UUIDString
             if (discoveredPeripherals[deviceId] == null) {
-                val deviceName = didDiscoverPeripheral.name ?: "Unknown Device"
+                // Prefer the advertised local name over the peripheral's cached GAP name, to
+                // match what Android reads from the scan record and what a name filter expects.
+                val deviceName = advertisementData[CBAdvertisementDataLocalNameKey] as? String
+                    ?: didDiscoverPeripheral.name
+                    ?: "Unknown Device"
+                if (!config.accepts(deviceName)) {
+                    NSLog("BleManager: filtered out by app: $deviceName ($deviceId)")
+                    return
+                }
 
                 var profile: UwbProfile? = null
                 val serviceUuids =
@@ -437,6 +445,10 @@ actual class BleManager(
     }
 
     actual fun advertise() {
+        if (!config.advertise) {
+            NSLog("BleManager: advertising disabled by BleDiscoveryConfig")
+            return
+        }
         if (peripheralManager == null) {
             peripheralManager = CBPeripheralManager(peripheralManagerDelegate, null)
         }
@@ -476,6 +488,10 @@ actual class BleManager(
     // ---- Public API: GATT Server ----
 
     actual fun startGattServer() {
+        if (!config.hostGattServer) {
+            NSLog("BleManager: GATT server disabled by BleDiscoveryConfig")
+            return
+        }
 
         if (peripheralManager == null) {
             peripheralManager = CBPeripheralManager(peripheralManagerDelegate, null)

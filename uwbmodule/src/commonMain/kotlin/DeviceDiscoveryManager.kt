@@ -5,6 +5,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -44,6 +45,27 @@ data class DiscoveryEvent(
 
 
 /**
+ * Whether a device should be dropped from the list for going quiet.
+ *
+ * [discoverOnly] is the `autoConnect = false` case, where the device list *is* the app's pick list.
+ * A Discovered peer is normally reported only once (Android caches the scan result, iOS has
+ * duplicate reports off), so its `lastSeen` never refreshes and the usual window would empty the
+ * list while every device is still sitting there. Ranging and Recovering peers are never purged
+ * here either: the first is watched by the silence watchdog, the second is waiting on its backoff.
+ */
+internal fun isStale(
+    state: DeviceState,
+    ageMs: Long,
+    discoverOnly: Boolean,
+    staleMs: Long,
+    suspendedMs: Long,
+): Boolean {
+    if (state == DeviceState.Ranging || state == DeviceState.Recovering) return false
+    if (discoverOnly && state == DeviceState.Discovered) return false
+    return ageMs > (if (state == DeviceState.Suspended) suspendedMs else staleMs)
+}
+
+/**
  * Orchestrates the full device discovery → BLE config exchange → UWB ranging pipeline.
  *
  * Flow:
@@ -51,16 +73,29 @@ data class DiscoveryEvent(
  * 2. BLE GATT exchange trades UWB session configs between the two devices.
  * 3. UWB ranging starts with the agreed-upon parameters.
  * 4. Distance updates are emitted via [nearbyDevices].
+ *
+ * @param autoConnect whether a discovered peer is exchanged with immediately, which is the default.
+ *   False gives discover-only mode: peers are listed as [DeviceState.Discovered] and left alone
+ *   until the app calls [connectPeer], for an app that presents a pick list instead of ranging with
+ *   everything it can see. Narrowing *what gets listed* is a separate thing and belongs to
+ *   [BleDiscoveryConfig.nameContains], which runs before any UWB config is minted.
  */
 class DeviceDiscoveryManager(
     private val multiplatformUwbManager: MultiplatformUwbManager,
     private val bleManager: BleManager,
     private val recovery: RecoveryPolicy = RecoveryPolicy(),
+    private val autoConnect: Boolean = true,
 ) {
     private val _nearbyDevices = MutableStateFlow<List<NearbyDevice>>(emptyList())
     val nearbyDevices: Flow<List<NearbyDevice>> = _nearbyDevices.asStateFlow()
 
-    private val _events = MutableSharedFlow<DiscoveryEvent>(extraBufferCapacity = 64)
+    // DROP_OLDEST because emitEvent uses tryEmit: with the default SUSPEND policy a full buffer
+    // makes tryEmit fail, which silently discards the *newest* event. For a debug log that is the
+    // wrong end to lose.
+    private val _events = MutableSharedFlow<DiscoveryEvent>(
+        extraBufferCapacity = 64,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
     /** Lifecycle events for UI debugging. */
     val events: Flow<DiscoveryEvent> = _events.asSharedFlow()
 
@@ -187,10 +222,10 @@ class DeviceDiscoveryManager(
         // Initialize UWB and wait for it to complete before reading local config
         multiplatformUwbManager.initialize()
 
-        // Start GATT server so peers can exchange configs with us
+        // Start GATT server so peers can exchange configs with us, and advertise so they can find
+        // us. Both are no-ops when turned off in BleDiscoveryConfig (an app that only reaches out to
+        // accessories needs neither).
         bleManager.startGattServer()
-
-        // Start BLE scanning and advertising
         bleManager.startScanning()
         bleManager.advertise()
 
@@ -255,12 +290,14 @@ class DeviceDiscoveryManager(
         val (stale, silent) = mutex.withLock {
             val now = getCurrentTimeMillis()
             val currentDevices = _nearbyDevices.value
-            // A Recovering peer is waiting on its backoff, and a Ranging one is watched for silence
-            // below, so neither is purged here.
             val (stale, active) = currentDevices.partition { device ->
-                val threshold = if (device.state == DeviceState.Suspended) SUSPENDED_THRESHOLD_MS else STALE_THRESHOLD_MS
-                device.state != DeviceState.Ranging && device.state != DeviceState.Recovering &&
-                    (now - device.lastSeen) > threshold
+                isStale(
+                    state = device.state,
+                    ageMs = now - device.lastSeen,
+                    discoverOnly = !autoConnect,
+                    staleMs = STALE_THRESHOLD_MS,
+                    suspendedMs = SUSPENDED_THRESHOLD_MS,
+                )
             }
             stale.forEach { device ->
                 pendingExchanges.remove(device.id)
@@ -457,18 +494,67 @@ class DeviceDiscoveryManager(
             _nearbyDevices.value = existingDevices
         }
 
-        // Initiate config exchange if not already done/pending
-        if (id !in exchangedPeers && id !in pendingExchanges) {
-            val connectionConfig = multiplatformUwbManager.getConnectionConfig(id)
-            if (connectionConfig != null) {
-                pendingExchanges.add(id)
-                emitEvent(EventType.ConfigExchangeStarted, id, "Starting GATT config exchange")
-                updateDeviceStateLocked(id, DeviceState.ExchangingConfig)
-                bleManager.connectAndExchangeConfig(id, connectionConfig)
-            } else {
-                emitEvent(EventType.DeviceDiscovered, id, "no config entry found")
-            }
+        // In discover-only mode the device is listed and left alone until the app calls
+        // [connectPeer], so a pick list can be built without ranging with all of it.
+        if (autoConnect) {
+            beginExchangeLocked(id)
         }
+    }
+
+    /**
+     * Start the config exchange with [id], unless it is already exchanging or exchanged.
+     * Must be called while holding [mutex]. Returns false when there was nothing to start.
+     */
+    private fun beginExchangeLocked(id: String): Boolean {
+        if (id in exchangedPeers || id in pendingExchanges) return false
+        val connectionConfig = multiplatformUwbManager.getConnectionConfig(id)
+        if (connectionConfig == null) {
+            emitEvent(EventType.DeviceDiscovered, id, "no config entry found")
+            return false
+        }
+        pendingExchanges.add(id)
+        emitEvent(EventType.ConfigExchangeStarted, id, "Starting GATT config exchange")
+        updateDeviceStateLocked(id, DeviceState.ExchangingConfig, touch = true)
+        bleManager.connectAndExchangeConfig(id, connectionConfig)
+        return true
+    }
+
+    /**
+     * Range with one discovered peer, for an app driving selection itself (see the `autoConnect`
+     * constructor flag). The BLE layer prepared this peer's local config when it was discovered, so
+     * this is the same exchange the automatic path would have run.
+     *
+     * No-op if [peerId] isn't a known device, or is already exchanging or ranging.
+     */
+    suspend fun connectPeer(peerId: String) = mutex.withLock {
+        if (_nearbyDevices.value.none { it.id == peerId }) return@withLock
+        beginExchangeLocked(peerId)
+        Unit
+    }
+
+    /**
+     * Stop ranging with [peerId] but keep it in [nearbyDevices] as [DeviceState.Discovered], so the
+     * app can range with it again without rescanning. The BLE cache entry is kept for the same
+     * reason, unlike the stale purge or a recovery restart, which both drop it to force a
+     * re-discovery.
+     */
+    suspend fun disconnectPeer(peerId: String) {
+        val isAccessory = mutex.withLock {
+            if (_nearbyDevices.value.none { it.id == peerId }) return
+            restartJobs.remove(peerId)?.cancel()
+            recoveringPeers.remove(peerId)
+            recoveryTracker.reset(peerId)
+            exchangedPeers.remove(peerId)
+            pendingExchanges.remove(peerId)
+            identityKeyToPeer.entries.removeAll { it.value.peerId == peerId }
+            updateDeviceStateLocked(peerId, DeviceState.Discovered, touch = true)
+            accessoryPeers.remove(peerId)
+        }
+        if (isAccessory) {
+            bleManager.sendToPeer(peerId, byteArrayOf(NI_ACCESSORY_STOP))
+        }
+        multiplatformUwbManager.stopRanging(peerId)
+        emitEvent(EventType.SessionEnded, peerId, "Disconnected by app")
     }
 
     /**
