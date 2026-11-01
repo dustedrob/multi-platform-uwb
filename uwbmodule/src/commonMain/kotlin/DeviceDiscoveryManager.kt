@@ -52,6 +52,14 @@ data class DiscoveryEvent(
  * duplicate reports off), so its `lastSeen` never refreshes and the usual window would empty the
  * list while every device is still sitting there. Ranging and Recovering peers are never purged
  * here either: the first is watched by the silence watchdog, the second is waiting on its backoff.
+ *
+ * An exchange in flight gets [exchangingMs] instead of the usual window, because `lastSeen` cannot
+ * refresh while it runs (the peer was reported once and we are now connected to it, not scanning
+ * it) and a GATT connect plus service discovery plus the accessory handshake can outlast the
+ * ordinary window. Purging mid-exchange used to abandon the connection and push the peer back
+ * through discovery, which reconnected and was purged again in the same loop, so a slow accessory
+ * never finished connecting (#66). The window is a timeout rather than an exemption: an exchange
+ * that really is dead has to age out, or the peer could never be rediscovered.
  */
 internal fun isStale(
     state: DeviceState,
@@ -59,10 +67,16 @@ internal fun isStale(
     discoverOnly: Boolean,
     staleMs: Long,
     suspendedMs: Long,
+    exchangingMs: Long,
 ): Boolean {
     if (state == DeviceState.Ranging || state == DeviceState.Recovering) return false
     if (discoverOnly && state == DeviceState.Discovered) return false
-    return ageMs > (if (state == DeviceState.Suspended) suspendedMs else staleMs)
+    val window = when (state) {
+        DeviceState.Suspended -> suspendedMs
+        DeviceState.ExchangingConfig -> exchangingMs
+        else -> staleMs
+    }
+    return ageMs > window
 }
 
 /**
@@ -145,6 +159,12 @@ class DeviceDiscoveryManager(
         private const val STALE_THRESHOLD_MS = 10_000L
         /** A suspended session gets longer: iOS keeps them for a while and re-runs them on resume. */
         private const val SUSPENDED_THRESHOLD_MS = 60_000L
+        /**
+         * An exchange in flight gets longer still: connect, service discovery and the accessory
+         * init/notify round trip have all been seen to take more than the ordinary window on a
+         * busy radio, and purging mid-exchange costs the connection (#66).
+         */
+        private const val EXCHANGING_THRESHOLD_MS = 30_000L
         private const val CLEANUP_INTERVAL_MS = 5_000L
 
         /**
@@ -297,6 +317,7 @@ class DeviceDiscoveryManager(
                     discoverOnly = !autoConnect,
                     staleMs = STALE_THRESHOLD_MS,
                     suspendedMs = SUSPENDED_THRESHOLD_MS,
+                    exchangingMs = EXCHANGING_THRESHOLD_MS,
                 )
             }
             stale.forEach { device ->

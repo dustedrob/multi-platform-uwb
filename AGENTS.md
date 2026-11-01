@@ -112,7 +112,10 @@ composeApp (sample)          uwbmodule (library, package com.dustedrob.uwb)
   question and belongs to `DeviceDiscoveryManager(autoConnect = ...)` with `connectPeer` /
   `disconnectPeer`. In discover-only mode `Discovered` peers are exempt from the stale purge (see
   `isStale`): they are reported once, so `lastSeen` never refreshes and the pick list would otherwise
-  empty itself. (PR #60)
+  empty itself. (PR #60) An `ExchangingConfig` peer gets a longer window (30 s) for the same reason:
+  `lastSeen` cannot refresh while we are connected to it rather than scanning it, and purging
+  mid-exchange drops the connection and sends the peer back through discovery, which reconnects and
+  is purged again in the same loop (#66). It is a timeout, not an exemption.
 - **`enableAndroidAccessoryProtocol` is off by default and Android-only.** iOS accessory ranging is
   Apple's standard protocol and always on when an accessory profile is present.
 - **Wire format is little-endian** with optional trailers (`UwbSessionConfig.toByteArray`), so accessory
@@ -165,6 +168,10 @@ composeApp (sample)          uwbmodule (library, package com.dustedrob.uwb)
 - Several CoreBluetooth delegate methods are deliberately not overridden (ObjC selector clashes in K/N):
   writes use `WriteWithoutResponse`, and `didDisconnect`/`didFailToConnect` are omitted.
 - Duplicates are off in `scanForPeripherals`, so `forgetDevice` restarts the scan to re-see a peer.
+  It must also `cancelPeripheralConnection` for the peripheral it drops, including one still
+  connecting: releasing the last strong reference mid-connect makes CoreBluetooth tear the link
+  down itself ("API MISUSE: Cancelling connection for unused peripheral") and the peer is stuck
+  until its next advertisement (#66). Android has the same hole, hence `pendingGatts`.
 - `NSLog` is the logging tool; Android uses `Log.d/e` with `TAG`.
 
 ## Conventions
