@@ -545,10 +545,18 @@ actual class BleManager(
     }
 
     actual fun forgetDevice(peerId: String) {
-        discoveredPeripherals.remove(peerId)
+        val discovered = discoveredPeripherals.remove(peerId)
         retainedLinks.remove(peerId)
         pendingConfigs.remove(peerId)
-        accessoryConnections.remove(peerId)?.let { centralManager?.cancelPeripheralConnection(it.peripheral) }
+        val connected = accessoryConnections.remove(peerId)
+        // Cancel whatever connection this peripheral has, in flight as well as established. Only
+        // the completed accessory link used to be cancelled, so forgetting a peer mid-connect let
+        // go of our last strong reference while CoreBluetooth was still connecting: it then tore
+        // the connection down itself ("API MISUSE: Cancelling connection for unused peripheral")
+        // and the peer sat half-connected until the next advertisement brought it back (#66).
+        setOfNotNull(connected?.peripheral, discovered?.bleDevice).forEach {
+            centralManager?.cancelPeripheralConnection(it)
+        }
         // CoreBluetooth reports a peripheral once per scan session (duplicates are off), so a
         // forgotten one only comes back after the scan is restarted.
         val central = centralManager

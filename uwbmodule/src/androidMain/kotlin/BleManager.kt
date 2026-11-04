@@ -84,6 +84,14 @@ actual class BleManager(
     private val retainedLinks = mutableSetOf<String>()
 
     /**
+     * GATT clients opened for a config exchange but not yet promoted to [accessoryConnections].
+     * connectGatt's handle has to be kept somewhere or an exchange abandoned part way through (by
+     * the stale purge, say) leaks the client until the process dies, and Android allows only a
+     * handful at a time (#66).
+     */
+    private val pendingGatts = mutableMapOf<String, BluetoothGatt>()
+
+    /**
      * Scan results arrive on the main looper, and preparing a peer's UWB config is several GMS round
      * trips, so that work is moved off the callback here.
      */
@@ -523,7 +531,7 @@ actual class BleManager(
         var queue: BleQueueManager? = null
 
         try {
-            device.connectGatt(context, false, object : BluetoothGattCallback()  {
+            pendingGatts[peerId] = device.connectGatt(context, false, object : BluetoothGattCallback()  {
                 @RequiresPermission(BLUETOOTH_CONNECT)
                 override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
                     if (status == 133) {
@@ -535,6 +543,7 @@ actual class BleManager(
                         gatt.discoverServices()
                     } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                         Log.d(TAG, "GATT client: disconnected from $peerId")
+                        pendingGatts.remove(peerId)
                         //gatt.close()
                     }
                 }
@@ -745,9 +754,18 @@ actual class BleManager(
     actual fun forgetDevice(peerId: String) {
         discoveredDevices.remove(peerId)
         retainedLinks.remove(peerId)
-        accessoryConnections.remove(peerId)?.let {
+        val accessory = accessoryConnections.remove(peerId)
+        accessory?.let {
             it.gatt.disconnect()
             it.gatt.close()
+        }
+        // An exchange still in flight has no entry above, and its client would otherwise stay open
+        // for the life of the process while the peer is pushed back through discovery (#66).
+        pendingGatts.remove(peerId)?.let { pending ->
+            if (pending != accessory?.gatt) {
+                pending.disconnect()
+                pending.close()
+            }
         }
         Log.d(TAG, "Forgot $peerId; it will be reported again on its next advertisement")
     }
@@ -762,6 +780,10 @@ actual class BleManager(
             accessoryConnections.values.forEach { it.gatt.close() }
         }
         accessoryConnections.clear()
+        if (hasConnectPermission()) {
+            pendingGatts.values.forEach { it.close() }
+        }
+        pendingGatts.clear()
         retainedLinks.clear()
         discoveredDevices.clear()
         deviceDiscoveredCallback = null

@@ -64,9 +64,10 @@ class StaleRetentionTest {
 
     private val stale = 10_000L
     private val suspended = 60_000L
+    private val exchanging = 30_000L
 
     private fun isStale(state: DeviceState, ageMs: Long, discoverOnly: Boolean = false) =
-        isStale(state, ageMs, discoverOnly, stale, suspended)
+        isStale(state, ageMs, discoverOnly, stale, suspended, exchanging)
 
     @Test
     fun quietDiscoveredPeerIsPurgedWhenAutoConnecting() {
@@ -85,7 +86,7 @@ class StaleRetentionTest {
     fun discoverOnlyDoesNotRetainOtherStates() {
         // Only Discovered is a pick-list entry. A failed or disconnected peer still ages out.
         assertTrue(isStale(DeviceState.Error, ageMs = 10_001, discoverOnly = true))
-        assertTrue(isStale(DeviceState.ExchangingConfig, ageMs = 10_001, discoverOnly = true))
+        assertTrue(isStale(DeviceState.ExchangingConfig, ageMs = 30_001, discoverOnly = true))
         assertTrue(isStale(DeviceState.Disconnected, ageMs = 10_001, discoverOnly = true))
     }
 
@@ -100,5 +101,22 @@ class StaleRetentionTest {
     fun suspendedPeerGetsTheLongerWindow() {
         assertFalse(isStale(DeviceState.Suspended, ageMs = 59_999))
         assertTrue(isStale(DeviceState.Suspended, ageMs = 60_001))
+    }
+
+    @Test
+    fun exchangeInFlightSurvivesTheOrdinaryWindow() {
+        // The purge used to take the connection away at 10 s and send the peer back through
+        // discovery, which reconnected and was purged again, so a slow accessory never got
+        // through its handshake (#66).
+        assertFalse(isStale(DeviceState.ExchangingConfig, ageMs = 10_001))
+        assertFalse(isStale(DeviceState.ExchangingConfig, ageMs = 29_999))
+    }
+
+    @Test
+    fun exchangeThatNeverCompletesStillAgesOut() {
+        // A timeout, not an exemption: otherwise a dead exchange would hold the peer forever and
+        // it could never be rediscovered.
+        assertTrue(isStale(DeviceState.ExchangingConfig, ageMs = 30_001))
+        assertTrue(isStale(DeviceState.ExchangingConfig, ageMs = 10_000_000))
     }
 }
