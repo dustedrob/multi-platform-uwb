@@ -160,6 +160,17 @@ composeApp (sample)          uwbmodule (library, package com.dustedrob.uwb)
   direction-capable iPhone reports no angle at all. The vector math lives in `directionToAngles`
   (commonMain, tested); elevation is `null` on the camera-assisted path and `NearbyDevice.verticalDirection`
   carries the category there.
+- **Only the U1 generation measures direction**: @sdetweil tested an iPhone 14, 15 and 17 and
+  `NISession.deviceCapabilities.supportsDirectionMeasurement` is false on all three, true on 11
+  through 13 (#75). So the direction vector is the *older* path, and on current iPhones an angle
+  only ever comes from camera assistance. Apps branch on `UwbCapabilities.reportsAzimuth`
+  (`DeviceDiscoveryManager.capabilities()`) rather than a model list, and derive their own bearing
+  from distance samples when it is false.
+- `NIDeviceCapability` itself is **iOS 16+**, so every read of `NISession.deviceCapabilities` sits
+  behind the same `directionApiAvailable` gate as `horizontalAngle` (the deployment target is 15.3,
+  where that selector does not exist). Pre-16 the capabilities are deduced instead: NI needs UWB
+  hardware, which starts at the iPhone 11, and the first iPhone without direction measurement
+  shipped on iOS 16, so anything still on 15 that supports NI is a U1 device.
 - `NIAlgorithmConvergenceStatusReason` is `NS_TYPED_ENUM` NSString constants, not an enum in K/N.
 - `NearbyInteraction` only forward-declares `ARSession`; cast to `objcnames.classes.ARSession`.
 - Several CoreBluetooth delegate methods are deliberately not overridden (ObjC selector clashes in K/N):

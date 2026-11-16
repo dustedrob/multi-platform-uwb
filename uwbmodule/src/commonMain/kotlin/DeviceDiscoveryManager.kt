@@ -208,6 +208,14 @@ class DeviceDiscoveryManager(
         }
     }
 
+    /**
+     * What the local radio can measure (see [UwbCapabilities]). Apps that need a bearing should
+     * branch on [UwbCapabilities.reportsAzimuth] rather than on the device model: on iOS only the
+     * U1 generation measures direction, so on an iPhone 14 or later with camera assistance off the
+     * library reports distance alone (#75).
+     */
+    suspend fun capabilities(): UwbCapabilities = multiplatformUwbManager.capabilities()
+
     fun getConnectionConfig(peerId:String): UwbSessionConfig?{
         return multiplatformUwbManager.getConnectionConfig((peerId))
     }
