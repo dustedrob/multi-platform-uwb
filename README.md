@@ -79,11 +79,13 @@ The project follows a modular architecture with the UWB functionality extracted 
 ### Module Dependencies
 
 The `uwbmodule` is configured as an Android library and iOS framework with the following key dependencies:
-- **Koin**: For dependency injection
 - **androidx.uwb**: Android UWB API
 - **kotlinx.datetime**: Timestamp management
 - **moko-permissions**: Cross-platform permission handling
 - **lifecycle-viewmodel**: ViewModel support
+
+There is no dependency injection framework: the library's managers are constructed directly, and
+platform managers share state through `ManagerFactory`.
 
 ### Data Flow
 
@@ -392,15 +394,26 @@ Main orchestrator class that combines BLE discovery with UWB ranging.
 ```kotlin
 class DeviceDiscoveryManager(
     multiplatformUwbManager: MultiplatformUwbManager,
-    bleManager: BleManager
+    bleManager: BleManager,
+    recovery: RecoveryPolicy = RecoveryPolicy(),
+    // false lists peers without ranging with them; pick them with connectPeer
+    autoConnect: Boolean = true,
 )
 
 // Properties
 val nearbyDevices: Flow<List<NearbyDevice>>
+val events: Flow<DiscoveryEvent>          // lifecycle log, for debugging UI
 
 // Methods
-fun startScanning()
-fun stopScanning()
+suspend fun startScanning()
+suspend fun stopScanning()
+suspend fun cleanup()
+suspend fun capabilities(): UwbCapabilities   // what this radio can measure
+suspend fun connectPeer(peerId: String)       // range with a listed peer
+suspend fun disconnectPeer(peerId: String)    // stop, but keep it listed
+suspend fun restartPeer(peerId: String)       // force one peer through discovery again
+suspend fun restartFailedPeers()              // e.g. when the app comes back to the foreground
+fun getConnectionConfig(peerId: String): UwbSessionConfig?
 ```
 
 ### NearbyDevice
@@ -462,7 +475,21 @@ Contributions are welcome! Please ensure you follow the existing code patterns a
 
 ## License
 
-This project is licensed under the **MIT License**.
+Licensed under the **Apache License, Version 2.0**. See [LICENSE](LICENSE) for the full text.
+
+    Copyright 2026 Roberto Betancourt
+
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
+
+        https://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
 
 ---
 
